@@ -8,9 +8,10 @@ import { calculateTotals } from "@/lib/pricing"
 import { formatDate, formatPrice, tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
-import { createTicket, applyAutomationUpdate, startTicketStatusPolling, useTicket, DEFAULT_PAYMENT_METHOD_ID, type PaymentMethod, type Ticket } from "@/lib/tickets"
+import { createTicket, applyAutomationUpdate, setTicketStatus, startTicketStatusPolling, useTicket, DEFAULT_PAYMENT_METHOD_ID, type PaymentMethod, type Ticket } from "@/lib/tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { useSession } from "@/lib/session"
+import { sendReceiptVerification } from "@/app/actions/telegram"
 import { GeneralAdmissionTiers, NumberedSeats, PaymentStep, TicketConfirmation } from "@/components/checkout-steps"
 
 /**
@@ -50,6 +51,8 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [method, setMethod] = useState<PaymentMethod>(paymentMethods[0]?.id ?? DEFAULT_PAYMENT_METHOD_ID)
   const [paymentRef, setPaymentRef] = useState("")
+  const [senderPhone, setSenderPhone] = useState("")
+  const [receiptImage, setReceiptImage] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [ticket, setTicket] = useState<Ticket | null>(null)
 
@@ -95,11 +98,35 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
     [items, mode, seatIds],
   )
 
-  /* متابعة حيّة لحالة التذكرة: تتحدث تلقائيًا فور اعتماد الأوتوميشن للتحويل. */
+  /* متابعة حيّة لحالة التذكرة: تتحدث تلقائيًا فور قرار الإدارة. */
   const liveTicket = useTicket(ticket?.id ?? "")
   useEffect(() => {
     if (!ticket) return
     return startTicketStatusPolling(4000)
+  }, [ticket])
+
+  /* استطلاع قرار الإدارة من سجل الخادم (الذي يحدّثه ويب هوك التليجرام). */
+  useEffect(() => {
+    if (!ticket) return
+    let cancelled = false
+    const check = async () => {
+      try {
+        const response = await fetch(`/api/tickets/status?id=${encodeURIComponent(ticket.id)}`)
+        const data = (await response.json()) as { status?: string }
+        if (cancelled) return
+        if (data.status === "approved" || data.status === "rejected") {
+          setTicketStatus(ticket.id, data.status)
+        }
+      } catch {
+        // تجاهل فشل الشبكة — سيُعاد الاستطلاع.
+      }
+    }
+    const timer = window.setInterval(check, 3000)
+    void check()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [ticket])
 
 
@@ -108,7 +135,8 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
       <div className="mx-auto max-w-2xl">
         <TicketConfirmation
           ticket={liveTicket ?? ticket}
-          onSimulateApproval={() => applyAutomationUpdate({ reference: ticket.id, via: "telegram" })}
+          onSimulateApproval={() => applyAutomationUpdate({ reference: ticket.id, status: "approved" })}
+          onSimulateRejection={() => applyAutomationUpdate({ reference: ticket.id, status: "rejected" })}
         />
         <Link
           href="/dashboard/customer"
@@ -126,7 +154,7 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
       <div className="flex flex-wrap items-center gap-2">
         <StepPill index={1} label="المقاعد / الفئات" active={step === 1} done={step > 1} />
         <StepPill index={2} label="الدفع المباشر" active={step === 2} done={step > 2} />
-        <StepPill index={3} label="إثبات التليجرام والتحقق الآلي" active={step === 3} done={false} />
+        <StepPill index={3} label="مراجعة الإيصال" active={step === 3} done={false} />
       </div>
       <p className="text-xs text-muted-foreground">
         {event.title} · {event.venue.name} · {formatDate(event.startsAt)} · نمط الحجز:{" "}
@@ -176,7 +204,17 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
 
       {step === 2 && (
         <div className="space-y-4">
-          <PaymentStep totalCents={totals.totalCents} method={method} onChange={setMethod} paymentRef={paymentRef} onRefChange={setPaymentRef} />
+          <PaymentStep
+            totalCents={totals.totalCents}
+            method={method}
+            onChange={setMethod}
+            paymentRef={paymentRef}
+            onRefChange={setPaymentRef}
+            senderPhone={senderPhone}
+            onSenderPhoneChange={setSenderPhone}
+            receiptImage={receiptImage}
+            onReceiptChange={setReceiptImage}
+          />
           {error && (
             <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive-foreground">
               {error}
@@ -193,8 +231,12 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
             <button
               type="button"
               onClick={() => {
-                if (paymentRef.trim().length < 3) {
-                  setError("أدخل رقم المحفظة المحوَّل منها أو رقم عملية التحويل/المرجع أولًا.")
+                if (senderPhone.trim().length < 8) {
+                  setError("أدخل رقم الموبايل الذي تم التحويل منه.")
+                  return
+                }
+                if (!receiptImage) {
+                  setError("أرفق صورة إيصال التحويل / Screenshot.")
                   return
                 }
                 setError(null)
@@ -212,13 +254,27 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
                   totalCents: totals.totalCents,
                   paymentMethod: method,
                   paymentRef,
+                  senderPhone,
+                  receiptImage,
                 })
                 setTicket(created)
                 setStep(3)
+                // إرسال الإيصال للإدارة عبر التليجرام مع أزرار قبول/رفض (fire-and-forget).
+                void sendReceiptVerification({
+                  ticketId: created.id,
+                  showTitle: created.showTitle,
+                  venue: created.venue,
+                  seatsCount: created.seats.length,
+                  seatsLabel: created.seats.join("، "),
+                  totalCents: created.totalCents,
+                  senderPhone: created.senderPhone ?? "",
+                  receiptImage: created.receiptImage,
+                  paymentMethod: created.paymentMethod,
+                }).catch(() => undefined)
               }}
               className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              إتمام الحجز وإرسال الإثبات عبر التليجرام
+              إتمام الحجز وإرسال الإيصال للمراجعة
             </button>
           </div>
         </div>

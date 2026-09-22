@@ -15,7 +15,6 @@ import {
   paymentMethodLabel,
   splitTickets,
   startTicketStatusPolling,
-  telegramTicketLink,
   useTickets,
   type Ticket as LocalTicket,
 } from "@/lib/tickets"
@@ -33,7 +32,7 @@ export function MyTickets() {
   const { upcoming, past } = useMemo(() => splitTickets(mine), [mine])
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming")
   const [openId, setOpenId] = useState<string | null>(null)
-  const pendingCount = mine.filter((ticket) => ticket.status === "pending_telegram").length
+  const pendingCount = mine.filter((ticket) => ticket.status === "pending").length
 
   /* تحديث تلقائي لحالة التذاكر لحظة اعتماد الأوتوميشن للتحويل. */
   useEffect(() => {
@@ -58,10 +57,9 @@ export function MyTickets() {
       </div>
 
       {pendingCount > 0 && (
-        <p className="flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-xs text-sky-100">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-sky-300" />
-          {pendingCount} تذكرة بانتظار إثبات التحويل عبر بوت التليجرام — جاري التحقق الآلي، وستتحول إلى «مؤكدة» تلقائيًا مع
-          رمز QR.
+        <p className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-300" />
+          {pendingCount} تذكرة بانتظار مراجعة إيصال التحويل من الإدارة — ستتحول إلى «مقبولة» فور اعتماد الإدارة.
         </p>
       )}
 
@@ -97,13 +95,13 @@ export function CustomerTicketStats() {
   const tickets = useTickets()
   const mine = useMemo(() => getTicketsForUser(session?.email ?? ""), [tickets, session?.email])
   const { upcoming } = useMemo(() => splitTickets(mine), [mine])
-  const verified = mine.filter((ticket) => ticket.status === "verified").length
-  const pending = mine.filter((ticket) => ticket.status === "pending_telegram").length
+  const approved = mine.filter((ticket) => ticket.status === "approved" || ticket.status === "checked_in").length
+  const pending = mine.filter((ticket) => ticket.status === "pending").length
   const last = mine[0]
 
   const cards = [
-    { label: "تذاكر مؤكدة", value: String(verified), hint: "رمز QR جاهز للبوابة" },
-    { label: "بانتظار إثبات التليجرام", value: String(pending), hint: "تحقق آلي بلا مراجعة يدوية" },
+    { label: "تذاكر مقبولة", value: String(approved), hint: "رمز QR جاهز للبوابة" },
+    { label: "بانتظار مراجعة الإيصال", value: String(pending), hint: "تراجعها الإدارة عبر التليجرام" },
     { label: "عروض قادمة", value: String(upcoming.length), hint: "من تذاكرك المحفوظة" },
     { label: "آخر تذكرة", value: last?.id ?? "—", hint: last?.showTitle ?? "لا تذاكر بعد" },
   ]
@@ -157,7 +155,7 @@ function TicketButton({ ticket, open, onToggle }: { ticket: LocalTicket; open: b
           </span>
           <span className="mt-1 block font-mono text-xs text-primary">{ticket.id}</span>
         </span>
-        <StatusBadge tone={ticket.status === "pending_telegram" ? "amber" : "green"}>
+        <StatusBadge tone={ticket.status === "pending" ? "amber" : ticket.status === "rejected" ? "red" : "green"}>
           {TICKET_STATUS_LABELS[ticket.status]}
         </StatusBadge>
       </button>
@@ -167,9 +165,9 @@ function TicketButton({ ticket, open, onToggle }: { ticket: LocalTicket; open: b
 }
 
 function TicketDetails({ ticket }: { ticket: LocalTicket }) {
-  const admitted = ticket.status !== "pending_telegram"
-  const verified = admitted
-  const botLink = telegramTicketLink(ticket.id)
+  const admitted = ticket.status === "approved" || ticket.status === "checked_in"
+  const pending = ticket.status === "pending"
+  const rejected = ticket.status === "rejected"
   return (
     <div className="space-y-3 border-t border-border/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -179,11 +177,12 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
           <li><span className="font-medium text-foreground">الفئة:</span> {ticket.tierName}</li>
           <li><span className="font-medium text-foreground">الإجمالي:</span> {formatPrice(ticket.totalCents)}</li>
           <li><span className="font-medium text-foreground">الدفع:</span> {paymentMethodLabel(ticket.paymentMethod)}</li>
-          <li><span className="font-medium text-foreground">مرجع التحويل:</span> {ticket.paymentRef}</li>
+          {ticket.senderPhone && (
+            <li><span className="font-medium text-foreground">رقم المحوّل:</span> <span dir="ltr">{ticket.senderPhone}</span></li>
+          )}
           {ticket.verifiedAt && (
             <li className="text-emerald-300">
-              اعتماد آلي عبر {ticket.verifiedVia === "sms" ? "SMS" : "التليجرام"}:{" "}
-              {new Date(ticket.verifiedAt).toLocaleString("ar-EG")}
+              تم القبول: {new Date(ticket.verifiedAt).toLocaleString("ar-EG")}
             </li>
           )}
           {ticket.checkedInAt && (
@@ -193,7 +192,7 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
           )}
         </ul>
         <div className="flex flex-col items-center gap-1">
-          {verified ? (
+          {admitted ? (
             <>
               <QrCode payload={ticket.qrCode} size={96} />
               <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -205,33 +204,34 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border/60 text-center text-[10px] text-muted-foreground">
               <Clock className="h-4 w-4" />
               رمز QR
-              <span>يُفتح بعد اعتماد البوت</span>
+              <span>يُفتح بعد قبول الإدارة</span>
             </div>
           )}
         </div>
       </div>
 
-      {!verified && (
-        <div className="space-y-2">
-          <a
-            href={botLink}
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-xs font-bold text-white transition-opacity hover:opacity-90",
-              ticket.paymentMethod === "vodafone_cash" ? "bg-red-600" : "bg-sky-500",
-            )}
-          >
-            أكمل التحويل وإرسال الإثبات عبر التليجرام 📲
-          </a>
-          <p className="flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 text-[11px] text-sky-100">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-sky-300" />
-            جاري التحقق الآلي من التحويل عبر التليجرام… تُحدَّث الحالة هنا تلقائيًا فور الاعتماد.
-          </p>
+      {ticket.receiptImage && (
+        <div className="rounded-lg border border-border/60 bg-background/40 p-2">
+          <p className="mb-1 text-[10px] text-muted-foreground">إيصال التحويل المرفق:</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={ticket.receiptImage} alt="إيصال التحويل" className="max-h-40 rounded-md border border-border/60 object-contain" />
         </div>
       )}
 
-      {verified && (
+      {pending && (
+        <p className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-100">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-300" />
+          جاري مراجعة إيصال التحويل من قبل الإدارة ⏳ — سيُفعَّل رمز QR فور القبول.
+        </p>
+      )}
+
+      {rejected && (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-[11px] text-destructive-foreground">
+          تم رفض هذا الحجز ❌ — تواصل مع الدعم لمراجعة إيصال التحويل.
+        </p>
+      )}
+
+      {admitted && (
         <SocialShareButton
           label="شارك حضورك 🎭"
           data={{

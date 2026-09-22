@@ -99,8 +99,8 @@ async function saveTicketAsImage(ticket: Ticket): Promise<void> {
   context.font = "bold 40px monospace"
   context.fillText(ticket.id, 60, 410)
 
-  // رمز QR (يُرسم فقط عند التحقق/الحضور).
-  const verified = ticket.status !== "pending_telegram"
+  // رمز QR (يُرسم فقط بعد قبول الإدارة أو تسجيل الحضور).
+  const verified = ticket.status === "approved" || ticket.status === "checked_in"
   if (verified) {
     const matrix = qrMatrix(ticket.qrCode, 21)
     const modules = matrix.length

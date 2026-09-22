@@ -11,7 +11,7 @@ import { sendTelegramNotification } from "@/lib/telegram"
  * كل من صفحة الحجز ولوحة العميل عبر `useTickets()` أو القراءات المباشرة.
  */
 
-export type TicketStatus = "pending_telegram" | "verified" | "checked_in"
+export type TicketStatus = "pending" | "approved" | "rejected" | "checked_in"
 /** معرّف وسيلة الدفع — نص حر لأن الوسائل تُدار ديناميكيًا من لوحة العمليات. */
 export type PaymentMethod = string
 /** معرّفات وسائل الدفع الافتراضية. */
@@ -41,6 +41,10 @@ export type Ticket = {
   paymentMethod: PaymentMethod
   paymentRef: string
   status: TicketStatus
+  /** رابط/Base64 لصورة إيصال التحويل المرفقة. */
+  receiptImage?: string
+  /** رقم الموبايل الذي تم التحويل منه. */
+  senderPhone?: string
   /** حمولة رمز QR (مرجع التذكرة + العرض). */
   qrCode: string
   /** وقت اعتماد الأوتوميشن (تليجرام/SMS) — لا يوجد قبل التحقق. */
@@ -73,8 +77,9 @@ export function paymentMethodLabel(id: string): string {
 }
 
 export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
-  pending_telegram: "بانتظار إثبات التحويل على التليجرام",
-  verified: "مؤكدة — QR جاهز",
+  pending: "قيد مراجعة الإيصال",
+  approved: "مقبول — QR فعّال",
+  rejected: "مرفوض",
   checked_in: "تم الحضور — مسحت عند البوابة",
 }
 
@@ -158,12 +163,19 @@ function parseTickets(raw: string | null): Ticket[] {
   try {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    // ترحيل الحالات القديمة (pending) إلى حالة الأوتوميشن الجديدة.
-    return (parsed as Ticket[]).map((ticket) => ({
-      ...ticket,
-      status:
-        ticket.status === "verified" || ticket.status === "checked_in" ? ticket.status : "pending_telegram",
-    }))
+    // ترحيل الحالات القديمة إلى نموذج المراجعة اليدوية للإيصال.
+    return (parsed as Ticket[]).map((ticket) => {
+      const old = ticket.status as string
+      const status: TicketStatus =
+        old === "checked_in"
+          ? "checked_in"
+          : old === "verified"
+            ? "approved"
+            : old === "rejected"
+              ? "rejected"
+              : "pending"
+      return { ...ticket, status }
+    })
   } catch {
     return []
   }
@@ -236,11 +248,13 @@ export type CreateTicketInput = {
   totalCents: number
   paymentMethod: PaymentMethod
   paymentRef: string
+  receiptImage?: string
+  senderPhone?: string
 }
 
 /**
- * ينشئ تذكرة بحالة `pending_telegram` (بانتظار إثبات التحويل عبر البوت)
- * مع رمز QR فريد — ويُمنع عرض الـ QR للعميل حتى يعتمد الأوتوميشن التحويل.
+ * ينشئ تذكرة بحالة `pending` (بانتظار مراجعة إيصال التحويل من الإدارة)
+ * مع رمز QR — ويبقى الـ QR محجوبًا حتى قبول الإدارة.
  */
 export function createTicket(input: CreateTicketInput): Ticket {
   const reference = makeReference()
@@ -249,13 +263,15 @@ export function createTicket(input: CreateTicketInput): Ticket {
     ...input,
     customerId: input.customerId.trim().toLowerCase() || "guest@kawalees.test",
     paymentRef: input.paymentRef.trim(),
-    status: "pending_telegram",
+    senderPhone: input.senderPhone?.trim() || undefined,
+    receiptImage: input.receiptImage || undefined,
+    status: "pending",
     qrCode: `kawalees:ticket:${reference}:${input.showId}`,
     createdAt: new Date().toISOString(),
   }
   mutateTickets((current) => [ticket, ...current])
 
-  // Bot Trigger: إشعار تليجرام للإدارة فور إنشاء التذكرة (آمن وغير معطِّل).
+  // إشعار تليجرام بسيط (بديل سريع) — الإيصال الكامل يُرسل عبر `sendReceiptToTelegram`.
   sendTelegramNotification(
     `🎭 تذكرة جديدة — كواليس\n🎟️ ${ticket.id}\n📌 ${ticket.showTitle}\n👤 ${ticket.customerName}\n💺 ${ticket.seats.join("، ")}\n💳 ${paymentMethodLabel(ticket.paymentMethod)}\n💰 ${formatPiastres(ticket.totalCents)}`,
   )
@@ -274,12 +290,12 @@ export function getTicketById(reference: string): Ticket | null {
   return readTickets().find((ticket) => ticket.id === reference.toUpperCase()) ?? null
 }
 
-/** تحقق عند البوابة/بعد تأكيد التحويل: pending_telegram → verified. */
+/** قبول التذكرة يدويًا/عند البوابة: pending → approved. */
 export function verifyTicket(
   reference: string,
   via: VerificationChannel = "telegram",
 ): { ok: boolean; ticket: Ticket | null; message: string } {
-  return applyAutomationUpdate({ reference, status: "verified", via })
+  return applyAutomationUpdate({ reference, status: "approved", via })
 }
 
 /** تبديل حالة التحقق من داخل اللوحات (تستعمله لوحة العميل). */
@@ -294,9 +310,8 @@ function referencesMatch(expected: string, received: string): boolean {
 }
 
 /**
- * نقطة الدخول الموحّدة لأوتوميشن كواليس (بوت التليجرام / SMS / بوابة الدفع):
- * تستقبل تحديث البوت وتبدّل حالة التذكرة من `pending_telegram` إلى `verified`
- * فتُتاح بيانات الـ QR للعميل فورًا في كل الصفحات المفتوحة.
+ * نقطة الدخول الموحّدة لتحديث حالة التذكرة (قبول/رفض من الإدارة عبر التليجرام):
+ * تستقبل القرار وتُحدّث التذكرة — وعند القبول يُفعَّل الـ QR فورًا.
  */
 export function applyAutomationUpdate(input: {
   reference: string
@@ -313,10 +328,10 @@ export function applyAutomationUpdate(input: {
     return { ok: false, ticket, message: "مرجع التحويل لا يطابق التذكرة — تم تجاهل التحديث." }
   }
 
-  const status: TicketStatus = input.status ?? "verified"
+  const status: TicketStatus = input.status ?? "approved"
   const via: VerificationChannel = input.via ?? "telegram"
   const updated: Ticket =
-    status === "verified"
+    status === "approved"
       ? { ...ticket, status, verifiedAt: new Date().toISOString(), verifiedVia: via }
       : { ...ticket, status }
 
@@ -325,9 +340,11 @@ export function applyAutomationUpdate(input: {
     ok: true,
     ticket: updated,
     message:
-      status === "verified"
-        ? `تم التحقق الآلي من التذكرة ${reference} عبر ${via === "sms" ? "رسالة SMS" : "بوت التليجرام"} — الـ QR جاهز الآن.`
-        : `تم تحديث حالة التذكرة ${reference}.`,
+      status === "approved"
+        ? `تم قبول الحجز ${reference} — الـ QR فعّال الآن.`
+        : status === "rejected"
+          ? `تم رفض الحجز ${reference}.`
+          : `تم تحديث حالة التذكرة ${reference}.`,
   }
 }
 
@@ -357,9 +374,9 @@ export function startTicketStatusPolling(intervalMs = 4000): () => void {
   return () => window.clearInterval(timer)
 }
 
-/** عدد التذاكر المعلّقة على إثبات التليجرام لمستخدم واحد. */
-export function pendingTelegramCount(customerId: string): number {
-  return getTicketsForUser(customerId).filter((ticket) => ticket.status === "pending_telegram").length
+/** عدد التذاكر المعلّقة على مراجعة الإيصال لمستخدم واحد. */
+export function pendingReviewCount(customerId: string): number {
+  return getTicketsForUser(customerId).filter((ticket) => ticket.status === "pending").length
 }
 
 /** نتيجة فحص التذكرة عند البوابة. */
@@ -395,11 +412,11 @@ export function checkInTicket(ticketId: string): CheckInResult {
     }
   }
 
-  if (ticket.status !== "verified") {
+  if (ticket.status !== "approved") {
     return {
       outcome: "not_verified",
       ticket,
-      message: "تذكرة غير صالحة أو بانتظار الدفع — أكمل التحويل عبر التليجرام أولًا.",
+      message: "تذكرة غير مقبولة بعد — انتظر موافقة الإدارة على إيصال التحويل.",
     }
   }
 
@@ -433,9 +450,9 @@ export function formatCheckInTime(value?: string): string {
   return formatClock(value)
 }
 
-/** تذاكر قابلة للمسح الآن (معتمدة ولم تُستخدم بعد). */
+/** تذاكر قابلة للمسح الآن (مقبولة من الإدارة ولم تُستخدم بعد). */
 export function scannableTickets(): Ticket[] {
-  return readTickets().filter((ticket) => ticket.status === "verified")
+  return readTickets().filter((ticket) => ticket.status === "approved")
 }
 
 /** تقسيم تذاكر المستخدم إلى قادمة (حسب موعد العرض) وسابقة. */

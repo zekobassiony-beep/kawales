@@ -133,10 +133,84 @@ export async function sendBookingNotification(booking: BookingNotification): Pro
 }
 
 /**
- * إشعار تليجرام بسيط وآمن للاستخدام من المتصفح (Bot Trigger).
- * يعتمد على متغيّرات عامة (`NEXT_PUBLIC_*`) ولا يرمي أخطاء أبدًا حتى لا يتعطّل الحجز
- * إن لم يكن البوت مهيأ. يُستدعى عند إتمام إنشاء التذكرة.
+ * إرسال إيصال التحويل إلى إدارة كواليس على تليجرام مع أزرار قبول/رفض
+ * (Inline Keyboard). تُستدعى من إجراء سيرفر (`app/actions/telegram.ts`).
  */
+
+export type ReceiptVerificationInput = {
+  ticketId: string
+  showTitle: string
+  venue: string
+  seatsCount: number
+  seatsLabel: string
+  totalCents: number
+  senderPhone: string
+  receiptImage?: string
+  paymentMethod: string
+}
+
+function buildReceiptCaption(input: ReceiptVerificationInput): string {
+  return [
+    "🧾 <b>إيصال تحويل جديد — بانتظار المراجعة</b>",
+    "",
+    `🎟️ <b>${escapeHtml(input.ticketId)}</b>`,
+    `📌 العرض: ${escapeHtml(input.showTitle)}`,
+    `🏛️ المكان: ${escapeHtml(input.venue)}`,
+    `💺 المقاعد (${input.seatsCount}): ${escapeHtml(input.seatsLabel)}`,
+    `💰 المبلغ: ${formatEgp(input.totalCents)}`,
+    `📞 رقم المحوّل: <code>${escapeHtml(input.senderPhone)}</code>`,
+    `💳 الوسيلة: ${escapeHtml(input.paymentMethod)}`,
+    "",
+    "استخدم الأزرار أدناه للقبول أو الرفض.",
+  ].join("\n")
+}
+
+/**
+ * يرسل صورة الإيصال (أو رسالة نصية عند عدم وجودها) مع Inline Keyboard
+ * بزرّي `✅ قبول الحجز` و`❌ رفض الحجز`.
+ */
+export async function sendReceiptToTelegram(input: ReceiptVerificationInput): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID
+  if (!token || !chatId) {
+    console.warn("[telegram] TELEGRAM_BOT_TOKEN/TELEGRAM_ADMIN_CHAT_ID غير مهيأة — تخطّي إرسال الإيصال.")
+    return
+  }
+
+  const caption = buildReceiptCaption(input)
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: "✅ قبول الحجز", callback_data: `approve_${input.ticketId}` },
+        { text: "❌ رفض الحجز", callback_data: `reject_${input.ticketId}` },
+      ],
+    ],
+  }
+
+  try {
+    if (input.receiptImage) {
+      const base64 = input.receiptImage.replace(/^data:[^;]+;base64,/, "")
+      const bytes = Uint8Array.from(Buffer.from(base64, "base64"))
+      const form = new FormData()
+      form.append("chat_id", chatId)
+      form.append("caption", caption)
+      form.append("parse_mode", "HTML")
+      form.append("reply_markup", JSON.stringify(replyMarkup))
+      form.append("photo", new Blob([bytes as BlobPart], { type: "image/jpeg" }), "receipt.jpg")
+      await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form })
+      return
+    }
+
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: caption, parse_mode: "HTML", reply_markup: replyMarkup }),
+    })
+  } catch (error) {
+    console.error(`[telegram] sendReceiptToTelegram failed: ${error instanceof Error ? error.message : error}`)
+  }
+}
+
 export function sendTelegramNotification(message: string): void {
   const token = process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN
   const chatId = process.env.NEXT_PUBLIC_TELEGRAM_ADMIN_CHAT_ID

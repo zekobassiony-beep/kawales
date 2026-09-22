@@ -11,10 +11,28 @@ import { dashboardPathForUser, signIn, signOut, useSession } from "@/lib/session
 
 /** صور معبّرة عن كل نوع حساب (جمهور/ممثل/فرقة/مسرح) — تُستخدم ككروت وخلفيات ديناميكية. */
 const ROLE_IMAGES: Record<AccountRole, string> = {
-  customer: "https://images.unsplash.com/photo-1503095396549-8075f6b16a5b?auto=format&fit=crop&w=900&q=80",
-  actor: "https://images.unsplash.com/photo-1514306191717-452ec28c7814?auto=format&fit=crop&w=900&q=80",
-  troupe: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=900&q=80",
-  venue: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?auto=format&fit=crop&w=900&q=80",
+  customer: "/images/customer.jpg.jpeg",
+  actor: "/images/actor.jpg.jpeg",
+  troupe: "/images/troupe.jpg.jpeg",
+  venue: "/images/venue.jpg.jpeg",
+}
+
+/** صورة بديلة آمنة تُعرض عند غياب صورة الدور أو فشل تحميلها. */
+const ROLE_IMAGE_FALLBACK = "/placeholder.svg"
+
+/** صورة دور آمنة باستخدام next/image: تملأ حاويتها وتتحوّل للبديلة عند فشل التحميل. */
+function RoleImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <Image
+      src={failed ? ROLE_IMAGE_FALLBACK : src}
+      alt={alt}
+      fill
+      sizes="100vw"
+      className={cn("object-cover", className)}
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 /** إحداثيات هندسية لتوسّع البطاقة النشطة مقابل البقية. */
@@ -27,12 +45,12 @@ const ACTIVE_GROW = 2.6
  */
 export function RoleGate() {
   const [selected, setSelected] = useState<AccountRole>("customer")
-  const [hovered, setHovered] = useState<AccountRole | null>(null)
+  const [hoveredRole, setHoveredRole] = useState<AccountRole | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
   const user = useSession()
   const closeAuth = useCallback(() => setAuthOpen(false), [])
 
-  const active = hovered ?? selected
+  const active = hoveredRole ?? selected
   const activeAccent = ROLE_META[active].accent
 
   const handleSelect = (role: AccountRole) => {
@@ -42,24 +60,24 @@ export function RoleGate() {
 
   return (
     <section className="relative isolate min-h-screen w-full overflow-hidden">
-      {/* خلفية ديناميكية: صورة الدور المحدد تتلاشى/تظهر بكامل الصفحة + شبكة + توهج */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+      {/* خلفية ديناميكية بكامل الشاشة: الصور الأربع متراكبة وتتلاشى حسب الدور المُمرَّر عليه */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
         {ROLE_ORDER.map((role) => (
-          <Image
+          <RoleImage
             key={role}
             src={ROLE_IMAGES[role]}
             alt=""
-            fill
-            priority
-            sizes="100vw"
             className={cn(
-              "object-cover transition-opacity duration-700 ease-out",
-              active === role ? "opacity-30" : "opacity-0",
+              "transition-opacity duration-700 ease-in-out",
+              active === role ? "opacity-100" : "opacity-0",
             )}
           />
         ))}
-        <div className="absolute inset-0 bg-background/70" />
-        <div className="absolute inset-0 bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(245,196,81,0.08),transparent_65%)]" />
+
+        {/* طبقة التعتيم الداكنة + توهج النيون (vignette) لإبقاء النصوص والكروت مقروءة */}
+        <div className="absolute inset-0 bg-background/55" />
+        <div className="absolute inset-0 bg-[radial-gradient(120%_100%_at_50%_50%,transparent_35%,rgba(0,0,0,0.6)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(245,196,81,0.10),transparent_65%)]" />
         <div className="absolute inset-0 opacity-[0.14] [background-image:linear-gradient(to_right,rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:72px_72px]" />
         <div
           className="absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl transition-colors duration-700"
@@ -113,7 +131,7 @@ export function RoleGate() {
               role={role}
               active={active === role}
               selected={selected === role}
-              onHover={setHovered}
+              onHover={setHoveredRole}
               onSelect={handleSelect}
             />
           ))}
@@ -175,7 +193,7 @@ function RoleCard({
         )}
         style={{ boxShadow: active ? `0 0 0 1px ${meta.accent}66, 0 18px 40px -18px ${meta.accent}99` : undefined }}
       >
-        <Image src={ROLE_IMAGES[role]} alt={ROLE_LABELS[role]} fill sizes="80px" className="object-cover" />
+        <RoleImage src={ROLE_IMAGES[role]} alt={ROLE_LABELS[role]} />
       </span>
 
       <span className="flex flex-col items-center gap-1">

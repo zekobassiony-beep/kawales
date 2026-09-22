@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Armchair, Check, Clock, Copy, Loader2, Minus, Plus, Ticket as TicketIcon } from "lucide-react"
+import { useState } from "react"
+import { Armchair, Check, Clock, Copy, Minus, Plus, Ticket as TicketIcon, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, rowLabel, tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING } from "@/lib/seats"
@@ -9,12 +9,10 @@ import type { EventWithRelations } from "@/lib/queries"
 import { QrCode } from "@/components/qr-code"
 import { SocialShareButton } from "@/components/social-share-button"
 import { TicketUtilityButtons } from "@/components/ticket-utilities"
-import { usePaymentMethods, paymentMethodColorClass } from "@/lib/payment-methods"
+import { usePaymentMethods } from "@/lib/payment-methods"
 import {
-  TELEGRAM_TICKET_BOT,
   TICKET_STATUS_LABELS,
   paymentMethodLabel,
-  telegramTicketLink,
   type PaymentMethod,
   type Ticket,
 } from "@/lib/tickets"
@@ -25,6 +23,16 @@ import {
  */
 
 const FIELD_CLASS = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
+
+/** يقرأ ملف صورة كـ data URL (Base64) لإرساله للإدارة. */
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error("تعذّر قراءة الملف"))
+    reader.readAsDataURL(file)
+  })
+}
 
 /* ---------- الخطوة 1: اختيار المقاعد (كراسي محددة) ---------- */
 
@@ -156,12 +164,20 @@ export function PaymentStep({
   onChange,
   paymentRef,
   onRefChange,
+  senderPhone,
+  onSenderPhoneChange,
+  receiptImage,
+  onReceiptChange,
 }: {
   totalCents: number
   method: PaymentMethod
   onChange: (method: PaymentMethod) => void
   paymentRef: string
   onRefChange: (value: string) => void
+  senderPhone: string
+  onSenderPhoneChange: (value: string) => void
+  receiptImage: string
+  onReceiptChange: (value: string) => void
 }) {
   const methods = usePaymentMethods().filter((item) => item.isActive)
   const selected = methods.find((item) => item.id === method) ?? methods[0] ?? null
@@ -233,6 +249,33 @@ export function PaymentStep({
             placeholder={selected.referenceLabel}
             className={FIELD_CLASS}
           />
+          <input
+            type="tel"
+            value={senderPhone}
+            onChange={(event) => onSenderPhoneChange(event.target.value)}
+            placeholder="رقم الموبايل الذي تم التحويل منه"
+            dir="ltr"
+            className={FIELD_CLASS}
+          />
+          <div>
+            <label className="block text-xs text-muted-foreground">إرفاق صورة إيصال التحويل / Screenshot</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (event) => {
+                const file = event.target.files?.[0]
+                if (!file) return
+                const dataUrl = await readFileAsDataUrl(file)
+                onReceiptChange(dataUrl)
+              }}
+              className="mt-1 w-full cursor-pointer rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition-colors file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary-foreground focus:border-primary"
+            />
+            {receiptImage ? (
+              <p className="mt-1 text-[11px] text-emerald-300">تم إرفاق الإيصال ✓</p>
+            ) : (
+              <p className="mt-1 text-[11px] text-muted-foreground">صورة واضحة للإيصال تسرّع مراجعة الإدارة.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -305,40 +348,57 @@ function CopyButton({ text }: { text: string }) {
 
 
 
-/* ---------- الخطوة 3: الأوتوميشن عبر التليجرام ---------- */
+/* ---------- الخطوة 3: مراجعة إيصال التحويل من الإدارة ---------- */
 
 export function TicketConfirmation({
   ticket,
   onSimulateApproval,
+  onSimulateRejection,
 }: {
   ticket: Ticket
-  /** محاكاة تحديث الأوتوميشن (نفس مسار البوت) — للعرض والاختبار فقط. */
+  /** محاكاة قرار الإدارة — للعرض والاختبار فقط. */
   onSimulateApproval?: () => void
+  onSimulateRejection?: () => void
 }) {
-  const verified = ticket.status === "verified"
+  const admitted = ticket.status === "approved" || ticket.status === "checked_in"
+  const pending = ticket.status === "pending"
+  const rejected = ticket.status === "rejected"
+
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold">الخطوة 3 — إتمام التحويل وإرسال الإثبات عبر التليجرام</h3>
+      <h3 className="text-sm font-semibold">الخطوة 3 — مراجعة إيصال التحويل</h3>
 
       <div
         className={cn(
           "flex items-start gap-3 rounded-xl border p-4 text-xs",
-          verified
+          admitted
             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-            : "border-amber-500/40 bg-amber-500/10 text-amber-200",
+            : rejected
+              ? "border-destructive/40 bg-destructive/10 text-destructive-foreground"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-200",
         )}
       >
-        <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        {admitted ? (
+          <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        ) : pending ? (
+          <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+        ) : (
+          <X className="mt-0.5 h-4 w-4 shrink-0" />
+        )}
         <p>
-          {verified
-            ? `تم اعتماد التحويل آليًا (${ticket.verifiedVia === "sms" ? "SMS" : "تليجرام"}) ورمز الـ QR متاح الآن — احتفظ به للبوابة.`
-            : "تذكرتك محفوظة بحالة pending_telegram. أكمل التحويل عبر البوت وأرسل الإثبات ليُعتمد حجزك آليًا بلا أي مراجعة يدوية."}
+          {admitted
+            ? "تم قبول حجزك — رمز الـ QR فعّال الآن، احتفظ به للبوابة."
+            : rejected
+              ? "تم رفض الحجز ❌ — تواصل مع الدعم لمراجعة إيصال التحويل."
+              : "تذكرتك محفوظة بحالة «قيد المراجعة». جاري مراجعة إيصال التحويل من قبل الإدارة ⏳ — سيُفعَّل رمز QR فور القبول."}
         </p>
       </div>
 
-      {!verified && <TelegramConfirmationPanel ticket={ticket} />}
+      <TicketCard ticket={ticket} />
 
-      {verified && (
+      <TicketUtilityButtons ticket={ticket} />
+
+      {admitted && (
         <SocialShareButton
           label="شارك حضورك 🎭"
           className="w-full"
@@ -355,89 +415,35 @@ export function TicketConfirmation({
         />
       )}
 
-      <TicketCard ticket={ticket} />
-
-      <TicketUtilityButtons ticket={ticket} />
-
-      {!verified && onSimulateApproval && (
-        <button
-          type="button"
-          onClick={onSimulateApproval}
-          className="text-[11px] text-muted-foreground underline transition-colors hover:text-foreground"
-        >
-          محاكاة اعتماد البوت للتحويل (للتجربة فقط)
-        </button>
+      {pending && (onSimulateApproval || onSimulateRejection) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+          <span className="text-[11px] text-muted-foreground">محاكاة قرار الإدارة (للتجربة):</span>
+          {onSimulateApproval && (
+            <button
+              type="button"
+              onClick={onSimulateApproval}
+              className="rounded-full border border-emerald-500/50 px-3 py-1 text-[11px] text-emerald-200 transition-colors hover:bg-emerald-500/10"
+            >
+              قبول ✅
+            </button>
+          )}
+          {onSimulateRejection && (
+            <button
+              type="button"
+              onClick={onSimulateRejection}
+              className="rounded-full border border-destructive/50 px-3 py-1 text-[11px] text-destructive-foreground transition-colors hover:bg-destructive/10"
+            >
+              رفض ❌
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-/** الزر الكبير لتوجيه العميل للبوت + شاشة الانتظار الأنيقة للتحقق الآلي. */
-function TelegramConfirmationPanel({ ticket }: { ticket: Ticket }) {
-  const [waiting, setWaiting] = useState(false)
-  const link = telegramTicketLink(ticket.id)
-  const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" })
-  const brandColor = paymentMethodColorClass(ticket.paymentMethod, "bg-primary")
-
-  return (
-    <div className="space-y-3">
-      <a
-        href={link}
-        target="_blank"
-        rel="noreferrer"
-        onClick={() => {
-          setWaiting(true)
-          scrollToTop()
-        }}
-        className={cn(
-          "flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-bold text-white transition-opacity hover:opacity-90",
-          brandColor,
-        )}
-      >
-        أكمل التحويل وإرسال الإثبات عبر التليجرام 📲
-      </a>
-      <p className="text-center text-[11px] text-muted-foreground">
-        سيُفتح بوت{" "}
-        <span className="font-mono font-bold text-primary">@{TELEGRAM_TICKET_BOT}</span> ومعه كود تذكرتك{" "}
-        <span className="font-mono font-bold text-foreground">{ticket.id}</span> — أرسل صورة/رقم التحويل في المحادثة.
-      </p>
-
-      {waiting && <TelegramVerificationWaiting ticket={ticket} />}
-
-      <div className="rounded-lg border border-border/60 bg-background/40 p-3 text-[11px] text-muted-foreground">
-        <Check className="mb-1 h-3.5 w-3.5 text-emerald-300" />
-        عند اعتماد البوت للتحويل تُرسل لك رسالة SMS تأكيد فورًا، ويظهر رمز الـ QR في هذه الصفحة وفي لوحة العميل تلقائيًا.
-      </div>
-    </div>
-  )
-}
-
-/** شاشة الانتظار: جاري التحقق الآلي من التحويل عبر التليجرام… */
-function TelegramVerificationWaiting({ ticket }: { ticket: Ticket }) {
-  const [dots, setDots] = useState(".")
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setDots((current) => (current.length >= 3 ? "." : `${current}.`))
-    }, 700)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-sky-500/40 bg-sky-500/10 p-4 text-xs text-sky-100">
-      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-sky-300" />
-      <div>
-        <p className="font-semibold">جاري التحقق الآلي من التحويل عبر التليجرام{dots}</p>
-        <p className="mt-1 text-sky-200/80">
-          نراقب كود التذكرة <span className="font-mono">{ticket.id}</span> لحظة بلحظة. لا تغلق الصفحة — ستتحدث الحالة
-          تلقائيًا فور اعتماد البوت، ويظهر رمز QR هنا مباشرة.
-        </p>
-      </div>
-    </div>
-  )
-}
-
 function TicketCard({ ticket }: { ticket: Ticket }) {
-  const verified = ticket.status === "verified"
+  const admitted = ticket.status === "approved" || ticket.status === "checked_in"
   return (
     <div className="rounded-2xl border border-primary/40 bg-card p-5 shadow-lg">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -447,9 +453,11 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
             <span
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-[10px] font-medium",
-                verified
+                admitted
                   ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                  : "border-amber-500/40 bg-amber-500/10 text-amber-200",
+                  : ticket.status === "rejected"
+                    ? "border-destructive/40 bg-destructive/10 text-destructive-foreground"
+                    : "border-amber-500/40 bg-amber-500/10 text-amber-200",
               )}
             >
               {TICKET_STATUS_LABELS[ticket.status]}
@@ -476,12 +484,12 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           </p>
           {ticket.verifiedAt && (
             <p className="mt-1 text-[11px] text-emerald-300">
-              تم الاعتماد الآلي: {new Date(ticket.verifiedAt).toLocaleString("ar-EG")}
+              تم القبول: {new Date(ticket.verifiedAt).toLocaleString("ar-EG")}
             </p>
           )}
         </div>
         <div className="flex flex-col items-center gap-1.5">
-          {verified ? (
+          {admitted ? (
             <>
               <QrCode payload={ticket.qrCode} size={96} />
               <span className="text-[10px] text-muted-foreground">امسح عند البوابة</span>
@@ -490,7 +498,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border/60 text-center text-[10px] text-muted-foreground">
               <Clock className="h-4 w-4" />
               رمز QR
-              <span>يُفتح بعد اعتماد البوت</span>
+              <span>يُفتح بعد قبول الإدارة</span>
             </div>
           )}
         </div>
