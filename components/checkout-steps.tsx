@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Armchair, Check, Clock, Copy, Minus, Plus, Ticket as TicketIcon, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, rowLabel, tierForRow } from "@/lib/format"
-import { MAX_SEATS_PER_BOOKING } from "@/lib/seats"
+import { MAX_SEATS_PER_BOOKING, hexToRgba } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
 import { QrCode } from "@/components/qr-code"
 import { SocialShareButton } from "@/components/social-share-button"
@@ -45,20 +45,38 @@ export function NumberedSeats({
   selected: string[]
   onToggle: (seatId: string) => void
 }) {
+  const tiers = event.priceTiers
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
         <Armchair className="h-4 w-4 text-primary" />
         خريطة المسرح — اختر كراسيّك بالضغط عليها
       </h3>
+
+      {/* دليل الفئات والأسعار */}
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+        {tiers.map((tier) => (
+          <span key={tier.id} className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px]">
+            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: tier.color }} />
+            <span className="font-medium">{tier.name}</span>
+            <span className="text-muted-foreground">{formatPrice(tier.priceCents)}</span>
+          </span>
+        ))}
+        {tiers.length === 0 && <span className="text-[11px] text-muted-foreground">لا فئات أسعار متاحة.</span>}
+      </div>
+
       <div className="mx-auto mb-4 mt-4 max-w-md">
         <div className="h-2 w-full rounded-full bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
         <p className="mt-2 text-center text-xs uppercase tracking-[0.3em] text-muted-foreground">المسرح</p>
       </div>
+
       <div className="overflow-x-auto pb-2">
         <div className="mx-auto w-max space-y-1.5">
           {Array.from({ length: event.venue.rows }, (_, rowIndex) => {
-            const tier = tierForRow(event.priceTiers, rowIndex)
+            const tier = tierForRow(tiers, rowIndex)
+            const color = tier?.color ?? "#c9a227"
+            const tint = hexToRgba(color, 0.16)
+            const border = hexToRgba(color, 0.5)
             return (
               <div key={rowIndex} className="flex items-center gap-2">
                 <span className="w-4 shrink-0 text-center text-xs font-medium text-muted-foreground">{rowLabel(rowIndex)}</span>
@@ -70,15 +88,18 @@ export function NumberedSeats({
                       <button
                         key={seatId}
                         type="button"
-                        title={`${seatId} · ${tier?.name ?? "—"}`}
+                        title={`${seatId} · ${tier?.name ?? "—"} · ${tier ? formatPrice(tier.priceCents) : ""}`}
                         aria-pressed={isSelected}
-                        aria-label={`المقعد ${seatId}`}
+                        aria-label={`المقعد ${seatId} — ${tier?.name ?? "—"}`}
                         onClick={() => onToggle(seatId)}
-                        className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[9px] font-semibold transition-colors",
+                        style={
                           isSelected
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/25",
+                            ? { backgroundColor: color, borderColor: color, color: "#0b1020" }
+                            : { backgroundColor: tint, borderColor: border }
+                        }
+                        className={cn(
+                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[9px] font-semibold transition-all duration-150",
+                          isSelected ? "scale-110 ring-2 ring-white/60" : "hover:scale-110 hover:brightness-125",
                         )}
                       >
                         {seatIndex + 1}
