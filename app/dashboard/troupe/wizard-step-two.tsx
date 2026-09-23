@@ -11,6 +11,7 @@ import {
   INVITE_DIRECTORY,
   LATER_VENUE_LABEL,
   SEATING_MODE_LABELS,
+  TIER_COLOR_PRESETS,
   cancelCrewInvite,
   inviteCrewMember,
   seatLabels,
@@ -69,47 +70,110 @@ export function VenueField({ draft, onChange }: { draft: StepTwoDraft; onChange:
 
 /* ---------- فئات التذاكر ---------- */
 
+/* ---------- فئات التذاكر المخصّصة (الاسم/السعر/اللون/نطاق الصفوف) ---------- */
+
+/** يستخرج نطاق الصفوف المعروض (1-based) من فئة. */
+function tierRange(rows: number[]): { from: number; to: number } {
+  if (rows.length === 0) return { from: 1, to: 1 }
+  const sorted = [...rows].sort((a, b) => a - b)
+  return { from: sorted[0] + 1, to: sorted[sorted.length - 1] + 1 }
+}
+
+/** يبني فهارس الصفوف (0-based) من نطاق مُدخل (1-based). */
+function rowsFromRange(from: number, to: number): number[] {
+  const start = Math.max(1, Math.min(from, to))
+  const end = Math.max(1, Math.max(from, to))
+  const rows: number[] = []
+  for (let index = start; index <= Math.min(end, 26); index += 1) rows.push(index - 1)
+  return rows
+}
+
 export function TiersEditor({ tiers, onChange }: { tiers: TicketTier[]; onChange: (tiers: TicketTier[]) => void }) {
   const updateTier = (id: string, patch: Partial<TicketTier>) =>
     onChange(tiers.map((tier) => (tier.id === id ? { ...tier, ...patch } : tier)))
 
   return (
-    <div className="space-y-2">
-      <label className="block text-xs text-muted-foreground">فئات التذاكر وأسعارها</label>
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs text-muted-foreground">
+          فئات المقاعد وأسعارها (الاسم · السعر · اللون · نطاق الصفوف)
+        </label>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          تُحفظ هذه الفئات مع العرض وتقرأها خريطة المقاعد ومحرك الحجز تلقائيًا في صفحة الحجز.
+        </p>
+      </div>
+
       {tiers.length === 0 && <p className="text-xs text-muted-foreground">لا توجد فئات بعد — أضف فئة أو استرجع الافتراضي.</p>}
-      {tiers.map((tier) => (
-        <div key={tier.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 p-2">
-          <input
-            type="text"
-            value={tier.name}
-            onChange={(event) => updateTier(tier.id, { name: event.target.value })}
-            className={cn(INPUT_CLASS, "w-28")}
-            aria-label="اسم الفئة"
-          />
-          <input
-            type="number"
-            min={0}
-            value={tier.priceEgp}
-            onChange={(event) => updateTier(tier.id, { priceEgp: Number(event.target.value) || 0 })}
-            className={cn(INPUT_CLASS, "w-24")}
-            aria-label="السعر (ج.م)"
-          />
-          <span className="text-xs text-muted-foreground">ج.م</span>
-          <input
-            type="number"
-            min={0}
-            value={tier.capacity}
-            onChange={(event) => updateTier(tier.id, { capacity: Number(event.target.value) || 0 })}
-            className={cn(INPUT_CLASS, "w-20")}
-            aria-label="عدد التذاكر"
-          />
-          <span className="text-xs text-muted-foreground">تذكرة</span>
-        </div>
-      ))}
-      <div className="flex gap-2">
+
+      {tiers.map((tier) => {
+        const range = tierRange(tier.rows)
+        return (
+          <div key={tier.id} className="space-y-2 rounded-lg border border-border/60 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="h-5 w-5 shrink-0 rounded-md border border-border/60" style={{ backgroundColor: tier.color }} />
+              <input
+                type="text"
+                value={tier.name}
+                onChange={(event) => updateTier(tier.id, { name: event.target.value })}
+                className={cn(INPUT_CLASS, "w-28")}
+                aria-label="اسم الفئة"
+              />
+              <input
+                type="number"
+                min={0}
+                value={tier.priceEgp}
+                onChange={(event) => updateTier(tier.id, { priceEgp: Number(event.target.value) || 0 })}
+                className={cn(INPUT_CLASS, "w-24")}
+                aria-label="السعر (ج.م)"
+              />
+              <span className="text-xs text-muted-foreground">ج.م</span>
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                من صف
+                <input
+                  type="number"
+                  min={1}
+                  max={26}
+                  value={range.from}
+                  onChange={(event) => updateTier(tier.id, { rows: rowsFromRange(Number(event.target.value) || 1, range.to) })}
+                  className={cn(INPUT_CLASS, "w-16")}
+                  aria-label="من صف"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                إلى صف
+                <input
+                  type="number"
+                  min={1}
+                  max={26}
+                  value={range.to}
+                  onChange={(event) => updateTier(tier.id, { rows: rowsFromRange(range.from, Number(event.target.value) || 1) })}
+                  className={cn(INPUT_CLASS, "w-16")}
+                  aria-label="إلى صف"
+                />
+              </label>
+              <button
+                type="button"
+                aria-label={`حذف فئة ${tier.name}`}
+                onClick={() => onChange(tiers.filter((item) => item.id !== tier.id))}
+                className="ms-auto rounded-full border border-destructive/50 p-1.5 text-destructive-foreground transition-colors hover:bg-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <TierColorPicker value={tier.color} onChange={(color) => updateTier(tier.id, { color })} />
+          </div>
+        )
+      })}
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => onChange([...tiers, { id: `tier-${Date.now()}`, name: "فئة جديدة", priceEgp: 100, capacity: 40 }])}
+          onClick={() =>
+            onChange([
+              ...tiers,
+              { id: `tier-${Date.now()}`, name: "فئة جديدة", priceEgp: 100, capacity: 40, color: "#3b82f6", rows: [] },
+            ])
+          }
           className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-secondary"
         >
           + إضافة فئة
@@ -124,6 +188,36 @@ export function TiersEditor({ tiers, onChange }: { tiers: TicketTier[]; onChange
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** منتقي لون الفئة: ألوان جاهزة + لون مخصص. */
+function TierColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground">اللون:</span>
+      {TIER_COLOR_PRESETS.map((preset) => (
+        <button
+          key={preset.color}
+          type="button"
+          aria-label={preset.label}
+          title={preset.label}
+          onClick={() => onChange(preset.color)}
+          className={cn(
+            "h-5 w-5 rounded-full border-2 transition-transform hover:scale-110",
+            value === preset.color ? "border-foreground" : "border-transparent",
+          )}
+          style={{ backgroundColor: preset.color }}
+        />
+      ))}
+      <input
+        type="color"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="لون مخصص"
+        className="h-6 w-8 cursor-pointer rounded border border-border/60 bg-transparent"
+      />
     </div>
   )
 }

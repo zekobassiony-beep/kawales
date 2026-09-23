@@ -13,6 +13,7 @@ import { usePaymentMethods } from "@/lib/payment-methods"
 import { useSession } from "@/lib/session"
 import { sendReceiptVerification } from "@/app/actions/telegram"
 import { GeneralAdmissionTiers, NumberedSeats, PaymentStep, TicketConfirmation } from "@/components/checkout-steps"
+import { findProductionByTitle, productionSeatTiers, useWorkspace, type SeatPriceTier } from "@/lib/productions"
 
 /**
  * مكون الحجز والدفع المباشر من ثلاث خطوات:
@@ -45,7 +46,21 @@ function StepPill({ index, label, active, done }: { index: number; label: string
 
 export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mode: Mode }) {
   const session = useSession()
+  const workspace = useWorkspace()
   const paymentMethods = usePaymentMethods().filter((item) => item.isActive)
+
+  /**
+   * فئات المقاعد الفعّالة: تُؤخذ من الفئات المخصّصة التي عرّفها المخرج/الفرقة في
+   * نموذج إنشاء العرض (محفوظة مع العرض في مساحة العمل) — لكل عرض بشكل مستقل —
+   * وإن لم توجد فئات مخصّصة نرجع لفئات قاعدة البيانات.
+   */
+  const tiers = useMemo<SeatPriceTier[]>(() => {
+    const match = findProductionByTitle(workspace.productions, event.title)
+    const custom = match ? productionSeatTiers(match.tiers) : []
+    return custom.length > 0 ? custom : event.priceTiers
+  }, [workspace.productions, event.title, event.priceTiers])
+
+  const effectiveEvent = useMemo<EventWithRelations>(() => ({ ...event, priceTiers: tiers }), [event, tiers])
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [seatIds, setSeatIds] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
@@ -73,18 +88,18 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
     if (mode === "numbered") {
       return seatIds.map((seatId) => {
         const parsed = parseSeatId(seatId)
-        const tier = parsed ? tierForRow(event.priceTiers, parsed.rowIndex) : undefined
+        const tier = parsed ? tierForRow(tiers, parsed.rowIndex) : undefined
         return { label: seatId, priceCents: tier?.priceCents ?? 0, tierName: tier?.name ?? "—" }
       })
     }
-    return event.priceTiers.flatMap((tier) =>
+    return tiers.flatMap((tier) =>
       Array.from({ length: quantities[tier.id] ?? 0 }, () => ({
         label: tier.name,
         priceCents: tier.priceCents,
         tierName: tier.name,
       })),
     )
-  }, [event.priceTiers, mode, quantities, seatIds])
+  }, [tiers, mode, quantities, seatIds])
 
   const totals = useMemo(() => calculateTotals(items.map((item) => item.priceCents)), [items])
 
@@ -164,10 +179,10 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
       {step === 1 && (
         <div className="space-y-4">
           {mode === "numbered" ? (
-            <NumberedSeats event={event} selected={seatIds} onToggle={toggleSeat} />
+            <NumberedSeats event={effectiveEvent} selected={seatIds} onToggle={toggleSeat} />
           ) : (
             <GeneralAdmissionTiers
-              event={event}
+              event={effectiveEvent}
               quantities={quantities}
               onSet={(tierId, quantity) => {
                 setError(null)
@@ -262,6 +277,7 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
                 // إرسال الإيصال للإدارة عبر التليجرام مع أزرار قبول/رفض (fire-and-forget).
                 void sendReceiptVerification({
                   ticketId: created.id,
+                  qrPayload: created.qrCode,
                   showTitle: created.showTitle,
                   venue: created.venue,
                   seatsCount: created.seats.length,

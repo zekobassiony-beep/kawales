@@ -1,9 +1,11 @@
 "use client"
 
-import { CalendarPlus, Download, Printer } from "lucide-react"
+import { CalendarPlus, Download, Printer, QrCode as QrCodeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { googleCalendarUrl } from "@/lib/calendar"
-import { qrMatrix, paymentMethodLabel, type Ticket } from "@/lib/tickets"
+import { QR_QUIET_ZONE, qrMatrix } from "@/lib/qr"
+import { downloadQrPng } from "@/lib/qr-image"
+import { paymentMethodLabel, type Ticket } from "@/lib/tickets"
 
 /**
  * أدوات تذكرة الجمهور: إضافة إلى تقويم جوجل، حفظ التذكرة كصورة، وطباعة/PDF —
@@ -33,6 +35,16 @@ export function TicketUtilityButtons({ ticket, className }: { ticket: Ticket; cl
           <CalendarPlus className="h-3.5 w-3.5" />
           أضف إلى تقويم جوجل 📅
         </a>
+      )}
+      {(ticket.status === "approved" || ticket.status === "checked_in") && (
+        <button
+          type="button"
+          onClick={() => void downloadQrPng(ticket.qrCode, `kawalees-qr-${ticket.id}.png`, 14)}
+          className="inline-flex items-center gap-2 rounded-full border border-primary/50 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+        >
+          <QrCodeIcon className="h-3.5 w-3.5" />
+          تنزيل رمز QR 🔳
+        </button>
       )}
       <button
         type="button"
@@ -99,26 +111,36 @@ async function saveTicketAsImage(ticket: Ticket): Promise<void> {
   context.font = "bold 40px monospace"
   context.fillText(ticket.id, 60, 410)
 
-  // رمز QR (يُرسم فقط بعد قبول الإدارة أو تسجيل الحضور).
+  // رمز QR الحقيقي مع منطقة هدوء (يُرسم فقط بعد قبول الإدارة أو تسجيل الحضور).
   const verified = ticket.status === "approved" || ticket.status === "checked_in"
   if (verified) {
-    const matrix = qrMatrix(ticket.qrCode, 21)
+    const matrix = qrMatrix(ticket.qrCode)
     const modules = matrix.length
-    const cell = 200 / modules
-    const originX = TICKET_W - 60 - 200
-    const originY = 280
+    const quiet = QR_QUIET_ZONE
+    const total = modules + quiet * 2
+    const box = 220
+    const cell = box / total
+    const originX = TICKET_W - 60 - box
+    const originY = 270
     context.fillStyle = "#ffffff"
-    context.fillRect(originX - 8, originY - 8, 200 + 16, 200 + 16)
-    context.fillStyle = "#0f172a"
+    context.fillRect(originX - 8, originY - 8, box + 16, box + 16)
+    context.fillStyle = "#0b1020"
     matrix.forEach((row, rowIndex) => {
       row.forEach((filled, columnIndex) => {
-        if (filled) context.fillRect(originX + columnIndex * cell, originY + rowIndex * cell, cell + 0.5, cell + 0.5)
+        if (filled) {
+          context.fillRect(
+            originX + (columnIndex + quiet) * cell,
+            originY + (rowIndex + quiet) * cell,
+            cell + 0.6,
+            cell + 0.6,
+          )
+        }
       })
     })
   } else {
     context.fillStyle = "#475569"
     context.font = "20px system-ui, 'Segoe UI', sans-serif"
-    context.fillText("QR يُفتح بعد اعتماد البوت", TICKET_W - 60 - 220, 380)
+    context.fillText("QR يُفتح بعد قبول الإدارة", TICKET_W - 60 - 240, 370)
   }
 
   context.direction = "rtl"

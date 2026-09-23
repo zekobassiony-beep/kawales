@@ -139,6 +139,8 @@ export async function sendBookingNotification(booking: BookingNotification): Pro
 
 export type ReceiptVerificationInput = {
   ticketId: string
+  /** حمولة رمز QR (نفس ما يُعرض على الموقع) — تُستخدم لإرسال نفس الرمز عند القبول. */
+  qrPayload: string
   showTitle: string
   venue: string
   seatsCount: number

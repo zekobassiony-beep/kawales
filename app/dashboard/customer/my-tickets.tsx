@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/format"
 import { SectionTitle, StatusBadge } from "@/app/dashboard/ui"
 import { QrCode } from "@/components/qr-code"
 import { SocialShareButton } from "@/components/social-share-button"
+import { TicketModal } from "@/components/ticket-modal"
 import { useSession } from "@/lib/session"
 import {
   TICKET_STATUS_LABELS,
@@ -168,6 +169,7 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
   const admitted = ticket.status === "approved" || ticket.status === "checked_in"
   const pending = ticket.status === "pending"
   const rejected = ticket.status === "rejected"
+  const [qrOpen, setQrOpen] = useState(false)
   return (
     <div className="space-y-3 border-t border-border/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -194,11 +196,20 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
         <div className="flex flex-col items-center gap-1">
           {admitted ? (
             <>
-              <QrCode payload={ticket.qrCode} size={96} />
-              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+              <QrCode
+                payload={ticket.qrCode}
+                size={104}
+                onClick={() => setQrOpen(true)}
+                title="اضغط لعرض الرمز بحجم كامل"
+              />
+              <button
+                type="button"
+                onClick={() => setQrOpen(true)}
+                className="inline-flex items-center gap-1 text-[10px] text-primary transition-colors hover:underline"
+              >
                 <QrCodeIcon className="h-3 w-3" />
-                اعرضه عند البوابة
-              </span>
+                عرض / تنزيل الرمز
+              </button>
             </>
           ) : (
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border/60 text-center text-[10px] text-muted-foreground">
@@ -246,6 +257,8 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
           }}
         />
       )}
+
+      <TicketModal ticket={qrOpen ? ticket : null} onClose={() => setQrOpen(false)} />
     </div>
   )
 }

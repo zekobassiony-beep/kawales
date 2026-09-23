@@ -17,7 +17,16 @@ export type AuditionStatus = "open" | "closed"
 export type ApplicationStatus = "pending" | "second_round" | "shortlist" | "rejected"
 export type AchievementKind = "course" | "workshop" | "external"
 
-export type TicketTier = { id: string; name: string; priceEgp: number; capacity: number }
+export type TicketTier = {
+  id: string
+  name: string
+  priceEgp: number
+  capacity: number
+  /** لون الفئة (hex) — يظهر في دليل الفئات وخريطة المقاعد. */
+  color: string
+  /** نطاق الصفوف (فهارس صفرية) التي تنتمي لهذه الفئة. */
+  rows: number[]
+}
 
 export type CrewMember = {
   id: string
@@ -135,12 +144,48 @@ export const ACHIEVEMENT_KIND_LABELS: Record<AchievementKind, string> = {
 /** تُخزَّن قيمة المسرح غير المحدد كـ `null` وهذا نصّها المعروض. */
 export const LATER_VENUE_LABEL = "يحدد لاحقاً"
 
-/** فئات التذاكر الافتراضية داخل الخطوة الثانية. */
+/** فئات التذاكر الافتراضية داخل الخطوة الثانية (VIP ذهبي / صالة بنفسجي / بلكون رمادي). */
 export const DEFAULT_TIERS: TicketTier[] = [
-  { id: "vip", name: "VIP", priceEgp: 350, capacity: 24 },
-  { id: "hall", name: "صالة", priceEgp: 250, capacity: 60 },
-  { id: "balcony", name: "بلكون", priceEgp: 150, capacity: 80 },
+  { id: "vip", name: "VIP", priceEgp: 350, capacity: 24, color: "#f5c451", rows: [0, 1] },
+  { id: "hall", name: "صالة", priceEgp: 250, capacity: 60, color: "#7c5cff", rows: [2, 3, 4] },
+  { id: "balcony", name: "بلكون", priceEgp: 150, capacity: 80, color: "#9aa4b2", rows: [5, 6, 7, 8, 9] },
 ]
+
+/** ألوان جاهزة لاختيار لون الفئة في نموذج إنشاء العرض. */
+export const TIER_COLOR_PRESETS: { label: string; color: string }[] = [
+  { label: "ذهبي VIP", color: "#f5c451" },
+  { label: "بنفسجي الصالة", color: "#7c5cff" },
+  { label: "أزرق", color: "#3b82f6" },
+  { label: "تركواز", color: "#22d3ee" },
+  { label: "وردي", color: "#ff4d94" },
+  { label: "أخضر", color: "#34d399" },
+  { label: "رمادي البلكون", color: "#9aa4b2" },
+  { label: "أبيض", color: "#f8fafc" },
+]
+
+/** فئة أسعار بصيغة محرك الحجز/خريطة المقاعد (السعر بالقروش + اللون + الصفوف). */
+export type SeatPriceTier = { id: string; name: string; priceCents: number; color: string; rows: number[] }
+
+/**
+ * يحوّل فئات العرض المخصصة (المحفوظة في مساحة عمل الفرقة) إلى صيغة فئات الأسعار
+ * التي يقرأها محرك الحجز وخريطة المقاعد — لكل عرض بشكل مستقل.
+ */
+export function productionSeatTiers(tiers: TicketTier[]): SeatPriceTier[] {
+  return tiers.map((tier) => ({
+    id: tier.id,
+    name: tier.name,
+    priceCents: Math.round(tier.priceEgp * 100),
+    color: tier.color,
+    rows: [...tier.rows].sort((a, b) => a - b),
+  }))
+}
+
+/** يطابق عرضًا محفوظًا في مساحة العمل مع عرض قاعدة البيانات بالعنوان. */
+export function findProductionByTitle(productions: Production[], title: string): Production | null {
+  const target = title.trim().toLowerCase()
+  if (target.length === 0) return null
+  return productions.find((production) => production.title.trim().toLowerCase() === target) ?? null
+}
 
 /** دليل الممثلين والمساعدين لإرسال دعوات الانضمام من لوحة الفرقة. */
 export const INVITE_DIRECTORY: { name: string; email: string; specialty: string }[] = [

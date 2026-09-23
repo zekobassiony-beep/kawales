@@ -112,49 +112,10 @@ function formatPiastres(piastres: number): string {
   return `${(Math.round(piastres) / 100).toLocaleString("ar-EG")} ج.م`
 }
 
-/* ---------- توليد رمز QR (مصفوفة فريدة من حمولة التذكرة) ---------- */
+/* ---------- توليد رمز QR (مُولّد حقيقي في `lib/qr`) ---------- */
 
-/** تجزئة FNV-1a حتمية — نفس الحمولة تنتج نفس الرمز دائمًا. */
-function hash32(input: string, seed: number): number {
-  let hash = seed
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return hash >>> 0
-}
-
-/**
- * مصفوفة رمز استجابة سريعة (QR-like) مرسومة من تجزئة الحمولة، بأحرف الموقع
- * الثلاثة (Finder Patterns) لتُقرأ بصريًا كرمز QR حقيقي وفريد لكل تذكرة.
- */
-export function qrMatrix(payload: string, modules = 25): boolean[][] {
-  const matrix: boolean[][] = Array.from({ length: modules }, () => Array.from({ length: modules }, () => false))
-  let seed = 0x811c9dc5
-  for (let index = 0; index < payload.length; index += 3) {
-    seed = hash32(`${payload.slice(index, index + 3)}`, seed)
-    for (let bit = 0; bit < 8; bit += 1) {
-      const position = ((seed >>> bit) * 2654435761) % (modules * modules)
-      const row = Math.floor(position / modules)
-      const column = position % modules
-      matrix[row][column] = true
-    }
-  }
-  // علامات الموقع الثلاثة (أعلى يمين/يسار وأسفل يسار).
-  const finder = (rowOffset: number, columnOffset: number) => {
-    for (let row = 0; row < 7; row += 1) {
-      for (let column = 0; column < 7; column += 1) {
-        const edge = row === 0 || row === 6 || column === 0 || column === 6
-        const core = row >= 2 && row <= 4 && column >= 2 && column <= 4
-        matrix[rowOffset + row][columnOffset + column] = edge || core
-      }
-    }
-  }
-  finder(0, 0)
-  finder(0, modules - 7)
-  finder(modules - 7, 0)
-  return matrix
-}
+/** يُعاد تصدير مُولّد رمز QR الحقيقي (Byte Mode · مستوى M · منطقة هدوء). */
+export { qrMatrix, withQuietZone, QR_QUIET_ZONE } from "@/lib/qr"
 
 /* ---------- المخزن (localStorage + useSyncExternalStore) ---------- */
 

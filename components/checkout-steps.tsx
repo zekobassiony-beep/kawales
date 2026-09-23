@@ -8,6 +8,7 @@ import { MAX_SEATS_PER_BOOKING, hexToRgba } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
 import { QrCode } from "@/components/qr-code"
 import { SocialShareButton } from "@/components/social-share-button"
+import { TicketModal } from "@/components/ticket-modal"
 import { TicketUtilityButtons } from "@/components/ticket-utilities"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import {
@@ -465,6 +466,7 @@ export function TicketConfirmation({
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
   const admitted = ticket.status === "approved" || ticket.status === "checked_in"
+  const [qrOpen, setQrOpen] = useState(false)
   return (
     <div className="rounded-2xl border border-primary/40 bg-card p-5 shadow-lg">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -512,8 +514,14 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
         <div className="flex flex-col items-center gap-1.5">
           {admitted ? (
             <>
-              <QrCode payload={ticket.qrCode} size={96} />
-              <span className="text-[10px] text-muted-foreground">امسح عند البوابة</span>
+              <QrCode payload={ticket.qrCode} size={112} onClick={() => setQrOpen(true)} title="اضغط لعرض الرمز بحجم كامل" />
+              <button
+                type="button"
+                onClick={() => setQrOpen(true)}
+                className="text-[10px] text-primary transition-colors hover:underline"
+              >
+                عرض / تنزيل الرمز
+              </button>
             </>
           ) : (
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border/60 text-center text-[10px] text-muted-foreground">
@@ -524,6 +532,8 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           )}
         </div>
       </div>
+
+      <TicketModal ticket={qrOpen ? ticket : null} onClose={() => setQrOpen(false)} />
     </div>
   )
 }
