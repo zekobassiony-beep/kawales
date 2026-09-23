@@ -9,6 +9,7 @@ import {
   isAccountRole,
   type AccountRole,
 } from "@/lib/roles"
+import { SESSION_EMAIL_COOKIE } from "@/lib/auth-constants"
 
 /**
  * جلسة الحساب التجريبية (Mock session).
@@ -164,9 +165,27 @@ export function persistSession(user: SessionUser | null): void {
   } catch {
     // التخزين المحلي قد يكون معطّلًا (تصفح خاص) — نكمل بالذاكرة فقط.
   }
+  // انعكاس بريد الجلسة في كوكي ليتمكن وسيط Next (`middleware.ts`) من حماية
+  // مسارات الأدمن (`/admin` و `/dashboard/admin`) قبل تحميل الصفحة.
+  syncSessionEmailCookie(user?.email ?? null)
   cachedRaw = raw
   cachedUser = user
   window.dispatchEvent(new Event(SESSION_CHANGE_EVENT))
+}
+
+/** يزامن كوكي البريد مع الجلسة (يُحذف عند الخروج). */
+function syncSessionEmailCookie(email: string | null): void {
+  if (typeof document === "undefined") return
+  const maxAge = 60 * 60 * 24 * 30 // 30 يومًا
+  try {
+    if (email && email.trim().length > 0) {
+      document.cookie = `${SESSION_EMAIL_COOKIE}=${encodeURIComponent(email.trim().toLowerCase())}; path=/; max-age=${maxAge}; samesite=lax`
+    } else {
+      document.cookie = `${SESSION_EMAIL_COOKIE}=; path=/; max-age=0; samesite=lax`
+    }
+  } catch {
+    // الكوكيز معطّلة — لا شيء نفعله.
+  }
 }
 
 /** اسم مبدئي قبل إكمال البيانات: بادئة البريد أو اسم الفئة. */

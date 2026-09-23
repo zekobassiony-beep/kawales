@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { Activity, BadgeCheck, CreditCard, KeyRound, Megaphone, ShieldCheck, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTickets } from "@/lib/tickets"
+import { useServerTickets } from "@/components/use-server-tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { inviteCodeStats, useInviteCodes } from "@/lib/invite-codes"
 import { useVerifiedEntities } from "@/lib/badges"
@@ -25,7 +26,16 @@ const TABS: { id: HqTab; label: string; icon: typeof Activity }[] = [
 /** غرفة عمليات كواليس: تحكم ديناميكي في الدفع، الأكواد، التوثيق، والنشرات. */
 export function HqDashboard({ adminName }: { adminName: string }) {
   const [tab, setTab] = useState<HqTab>("overview")
-  const tickets = useTickets()
+  const localTickets = useTickets()
+  const { tickets: serverTickets } = useServerTickets()
+  // دمج سجل Supabase (مصدر الحقيقة) مع المخزن المحلي.
+  const tickets = useMemo(() => {
+    if (serverTickets.length === 0) return localTickets
+    const merged = new Map<string, (typeof localTickets)[number]>()
+    for (const ticket of serverTickets) merged.set(ticket.id, ticket)
+    for (const ticket of localTickets) if (!merged.has(ticket.id)) merged.set(ticket.id, ticket)
+    return Array.from(merged.values())
+  }, [localTickets, serverTickets])
   const methods = usePaymentMethods()
   const codes = useInviteCodes()
   const entities = useVerifiedEntities()

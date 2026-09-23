@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
     // (3) تحديث حالة التذكرة فورًا — آمن على أي نسخة (يُنشئ سجلًا مؤقتًا عند الغياب).
     let result: TicketDecisionResult | null = null
     try {
-      result = approved ? verifyTicketOnServer(ticketId) : rejectTicketOnServer(ticketId)
+      result = approved ? await verifyTicketOnServer(ticketId) : await rejectTicketOnServer(ticketId)
     } catch (error) {
       console.warn(`[telegram] تعذّر تحديث حالة التذكرة ${ticketId}: ${describeError(error)}`)
     }

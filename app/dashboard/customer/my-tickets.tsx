@@ -9,6 +9,7 @@ import { QrCode } from "@/components/qr-code"
 import { SocialShareButton } from "@/components/social-share-button"
 import { TicketModal } from "@/components/ticket-modal"
 import { useSession } from "@/lib/session"
+import { useServerTickets } from "@/components/use-server-tickets"
 import {
   TICKET_STATUS_LABELS,
   formatCheckInTime,
@@ -22,14 +23,23 @@ import {
 
 /**
  * قسم «تذاكري وحجوزاتي» في لوحة العميل:
- * يعرض التذاكر القادمة والسابقة من مخزن `lib/tickets`، والضغط على أي
- * تذكرة يعرض الـ QR Code والتفاصيل الكاملة بمرونة تفاعلية.
+ * يدمج التذاكر حيًا من Supabase (مصدر الحقيقة) مع المخزن المحلي كطبقة فورية،
+ * والضغط على أي تذكرة يعرض الـ QR Code والتفاصيل الكاملة بمرونة تفاعلية.
  */
 export function MyTickets() {
   const session = useSession()
   const tickets = useTickets()
   const viewerEmail = session?.email ?? ""
-  const mine = useMemo(() => getTicketsForUser(viewerEmail), [tickets, viewerEmail])
+  const { tickets: serverTickets } = useServerTickets(viewerEmail)
+  const mine = useMemo(() => {
+    const local = getTicketsForUser(viewerEmail)
+    if (serverTickets.length === 0) return local
+    // سجل الخادم أولًا (مصدر الحقيقة) ثم المحلي غير المكرر.
+    const merged = new Map<string, LocalTicket>()
+    for (const ticket of serverTickets) merged.set(ticket.id, ticket as LocalTicket)
+    for (const ticket of local) if (!merged.has(ticket.id)) merged.set(ticket.id, ticket)
+    return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [tickets, viewerEmail, serverTickets])
   const { upcoming, past } = useMemo(() => splitTickets(mine), [mine])
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming")
   const [openId, setOpenId] = useState<string | null>(null)
@@ -90,11 +100,20 @@ export function MyTickets() {
   )
 }
 
-/** كروت أرقام العميل المحسوبة من مخزن التذاكر الحقيقي (بدل الأرقام الثابتة). */
+/** كروت أرقام العميل المحسوبة من جدول التذاكر (Supabase) مع المخزن المحلي. */
 export function CustomerTicketStats() {
   const session = useSession()
   const tickets = useTickets()
-  const mine = useMemo(() => getTicketsForUser(session?.email ?? ""), [tickets, session?.email])
+  const viewerEmail = session?.email ?? ""
+  const { tickets: serverTickets } = useServerTickets(viewerEmail)
+  const mine = useMemo(() => {
+    const local = getTicketsForUser(viewerEmail)
+    if (serverTickets.length === 0) return local
+    const merged = new Map<string, LocalTicket>()
+    for (const ticket of serverTickets) merged.set(ticket.id, ticket as LocalTicket)
+    for (const ticket of local) if (!merged.has(ticket.id)) merged.set(ticket.id, ticket)
+    return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [tickets, viewerEmail, serverTickets])
   const { upcoming } = useMemo(() => splitTickets(mine), [mine])
   const approved = mine.filter((ticket) => ticket.status === "approved" || ticket.status === "checked_in").length
   const pending = mine.filter((ticket) => ticket.status === "pending").length

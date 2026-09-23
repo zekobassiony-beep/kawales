@@ -25,7 +25,12 @@ export const HQ_PATH = "/hq-kawalees"
  * الجلسة التجريبية الحالية بلا مصادقة حقيقية، لذا يُقفل المسار المخفي
  * على هذه القائمة (يُستبدل بجدول أدوار في قاعدة البيانات لاحقًا).
  */
-export const SUPERADMIN_EMAILS = ["admin@kawalees.test", "hq@kawalees.test", "superadmin@kawalees.test"]
+export const SUPERADMIN_EMAILS = [
+  "zeko.bassiony@gmail.com",
+  "admin@kawalees.test",
+  "hq@kawalees.test",
+  "superadmin@kawalees.test",
+]
 
 /** هل هذا البريد يملك صلاحية غرفة العمليات؟ */
 export function isSuperadmin(email?: string | null): boolean {

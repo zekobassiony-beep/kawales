@@ -11,5 +11,5 @@ export const dynamic = "force-dynamic"
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id")?.trim().toUpperCase() ?? ""
   if (!id) return NextResponse.json({ status: "pending" })
-  return NextResponse.json({ status: getTicketStatus(id) ?? "pending" })
+  return NextResponse.json({ status: (await getTicketStatus(id)) ?? "pending" })
 }

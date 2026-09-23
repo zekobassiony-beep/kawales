@@ -9,6 +9,7 @@ import { formatDate, formatPrice, tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
 import { createTicket, applyAutomationUpdate, setTicketStatus, startTicketStatusPolling, useTicket, DEFAULT_PAYMENT_METHOD_ID, type PaymentMethod, type Ticket } from "@/lib/tickets"
+import { persistTicket } from "@/app/actions/tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { useSession } from "@/lib/session"
 import { sendReceiptVerification } from "@/app/actions/telegram"
@@ -272,6 +273,8 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
                 })
                 setTicket(created)
                 setStep(3)
+                // حفظ التذكرة فورًا في Supabase (مصدر الحقيقة للوحات والويب هوك).
+                void persistTicket(created).catch(() => undefined)
                 // إرسال الإيصال للإدارة عبر التليجرام مع أزرار قبول/رفض (fire-and-forget).
                 void sendReceiptVerification({
                   ticketId: created.id,
