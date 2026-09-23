@@ -70,3 +70,54 @@ export function getTicketRecord(id: string): ServerTicketRecord | undefined {
   return registry.get(normalize(id))
 }
 
+/* ---------- قرار الإدارة (مكافئ `verifyTicket` / `applyAutomationUpdate` في العميل) ---------- */
+
+export type TicketDecision = "approved" | "rejected"
+
+export type TicketDecisionResult = {
+  /** هل تم تطبيق قرار جديد فعليًا؟ */
+  ok: boolean
+  /** هل كانت التذكرة محسومة مسبقًا بنفس القرار؟ (لمنع التكرار) */
+  alreadyDecided: boolean
+  status: TicketStatus
+  /** نص توضيحي يُستخدم في رد التليجرام. */
+  message: string
+  record: ServerTicketRecord
+}
+
+/**
+ * يطبّق قرار الإدارة على تذكرة في سجل الخادم:
+ * - `approved` ⇒ تُعتمد التذكرة ويتفعّل رمز QR (مكافئ `verifyTicket`).
+ * - `rejected` ⇒ تُرفض التذكرة ويُمنع رمز QR (مكافئ `applyAutomationUpdate`).
+ * يعمل بأمان مع تكرار الضغط (idempotent) ويُنشئ سجلًا مصغّرًا إن لم توجد التذكرة.
+ */
+export function applyTicketDecision(id: string, decision: TicketDecision): TicketDecisionResult {
+  const ticketId = normalize(id)
+  const previous = registry.get(ticketId)?.status
+  const alreadyDecided = previous === decision
+
+  registerTicketStatus(ticketId, decision)
+
+  const record = registry.get(ticketId) as ServerTicketRecord
+  const message = alreadyDecided
+    ? decision === "approved"
+      ? "هذه التذكرة معتمدة بالفعل ✅"
+      : "هذه التذكرة مرفوضة بالفعل ❌"
+    : decision === "approved"
+      ? "تم قبول الحجز وتأكيد التذكرة ✅"
+      : "تم رفض الحجز ❌"
+
+  return { ok: true, alreadyDecided, status: decision, message, record }
+}
+
+/** يعتمد التذكرة على الخادم — الواجهة المكافئة لـ `verifyTicket` في مخزن العميل. */
+export function verifyTicketOnServer(id: string): TicketDecisionResult {
+  return applyTicketDecision(id, "approved")
+}
+
+/** يرفض التذكرة على الخادم. */
+export function rejectTicketOnServer(id: string): TicketDecisionResult {
+  return applyTicketDecision(id, "rejected")
+}
+
+
