@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import {
   rejectTicketOnServer,
   verifyTicketOnServer,
@@ -8,6 +8,16 @@ import { sendTicketQrImage } from "@/lib/telegram-ticket-image"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
+/** استجابة 200 مؤكدة — تمنع تليجرام من إعادة المحاولة (re-tries) عند أي خطأ داخلي. */
+function okResponse(extra: Record<string, unknown> = {}): NextResponse {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 })
+}
+
+/** وصف مختصر لأي خطأ داخل اللوج بلا انهيار. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 type TelegramCallbackQuery = {
   id: string
@@ -77,63 +87,89 @@ function qrCaption(result: TicketDecisionResult): string {
  * ويب هوك تليجرام: يعالج ضغطات الإدارة على أزرار الإيصال
  * (`approve_{ticketId}` / `reject_{ticketId}`).
  *
- * الترتيب مهم:
- *  1) قراءة `callback_query` من الجسم.
- *  2) `answerCallbackQuery` **فورًا** (أول نداء) لإزالة مؤشر التحميل في تليجرام.
- *  3) تطبيق القرار على التذكرة (`verifyTicket` / `applyAutomationUpdate`).
- *  4) تعديل نص الرسالة وإزالة الأزرار.
- *  5) إرسال رمز QR عند القبول.
+ * مصمّم لبيئة Vercel Serverless:
+ *  1) قراءة `callback_query` من الجسم (بلا انهيار على جسم غير صالح).
+ *  2) `answerCallbackQuery` **فورًا** داخل `try/catch` مستقلة تمامًا (لا تُعطّل أي خطوة قادمة).
+ *  3) تطبيق القرار على التذكرة مباشرة — يُنشئ سجلًا مؤقتًا إن لم تكن التذكرة في ذاكرة
+ *     هذه النسخة (اختلاف نسخ Vercel) دون أي Exception.
+ *  4) تعديل نص الرسالة وإرسال رمز QR **بعد** إرسال الاستجابة عبر `after()` (بلا تعليق).
+ *  5) استجابة `{ ok: true }` بـ 200 دائمًا حتى لا يتعطّل البوت أو يدخل في Re-tries.
  */
 export async function POST(req: NextRequest) {
-  const token = process.env.TELEGRAM_BOT_TOKEN
-  const body = (await req.json().catch(() => null)) as TelegramUpdate | null
-  const callback = body?.callback_query
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN
+    const body = (await req.json().catch(() => null)) as TelegramUpdate | null
+    const callback = body?.callback_query
 
-  // لا يوجد ضغط زر (تحديث آخر) — نرد بالنجاح فورًا.
-  if (!callback) return NextResponse.json({ ok: true })
+    // لا يوجد ضغط زر (تحديث آخر) — استجابة 200 فورية.
+    if (!callback) return okResponse()
 
-  // (1) استخراج المعرّف والقرار من callback_data (قراءة متزامنة سريعة).
-  const match = /^(approve|reject)_(.+)$/.exec(callback.data ?? "")
-  const approved = match?.[1] === "approve"
-  const ticketId = match ? match[2].trim().toUpperCase() : ""
+    // (1) استخراج المعرّف والقرار من callback_data (قراءة متزامنة سريعة).
+    const match = /^(approve|reject)_(.+)$/.exec(callback.data ?? "")
+    const approved = match?.[1] === "approve"
+    const ticketId = match ? match[2].trim().toUpperCase() : ""
 
-  if (!token) {
-    console.warn(
-      "[telegram] TELEGRAM_BOT_TOKEN غير مهيأ — لم يتم الرد على الزر (سيظل مؤشر التحميل ظاهرًا). " +
-        "اضبط المتغيّر في Vercel ثم أعد تسجيل الـ webhook.",
-    )
+    // (2) الرد الفوري على البوت — كتلة try/catch مستقلة لمنع تعليق الزر (spinner).
+    if (token) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            callback_query_id: callback.id,
+            text: match ? (approved ? "تم القبول ✅" : "تم الرفض ❌") : "لا يوجد إجراء مطابق",
+            show_alert: false,
+          }),
+        })
+      } catch (error) {
+        console.warn(`[telegram] answerCallbackQuery تعذّر: ${describeError(error)}`)
+      }
+    } else {
+      console.warn(
+        "[telegram] TELEGRAM_BOT_TOKEN غير مهيأ — لم يتم الرد على الزر. " +
+          "اضبط المتغيّر في Vercel ثم أعد تسجيل الـ webhook.",
+      )
+    }
+
+    // بيانات ضغط غير معروفة: نكتفي بالرد على البوت.
+    if (!match) return okResponse({ handled: false })
+
+    // (3) تحديث حالة التذكرة فورًا — آمن على أي نسخة (يُنشئ سجلًا مؤقتًا عند الغياب).
+    let result: TicketDecisionResult | null = null
+    try {
+      result = approved ? verifyTicketOnServer(ticketId) : rejectTicketOnServer(ticketId)
+    } catch (error) {
+      console.warn(`[telegram] تعذّر تحديث حالة التذكرة ${ticketId}: ${describeError(error)}`)
+    }
+
+    // (4) تعديل نص الرسالة + إرسال رمز QR في الخلفية بعد الاستجابة (لا تعليق للويب هوك).
+    //     نعتمد على chat_id/message_id الواردَين في التحديث نفسه، فلا يهم أي نسخة Vercel عالجت الضغط.
+    const chatId = callback.message?.chat?.id
+    const messageId = callback.message?.message_id
+    const decision = result
+    if (token && decision) {
+      try {
+        after(async () => {
+          if (chatId && messageId) {
+            await updateReceiptMessage(token, chatId, messageId, decision.message)
+          }
+          if (approved && !decision.alreadyDecided) {
+            await sendTicketQrImage({ qrPayload: decision.record.qrPayload, chatId, caption: qrCaption(decision) })
+          }
+        })
+      } catch (error) {
+        // في حال عدم توفّر سياق `after`: نكمل بلا تعليق الاستجابة.
+        console.warn(`[telegram] تعذّر جدولة تحديث الرسالة في الخلفية: ${describeError(error)}`)
+      }
+    }
+
+    // (5) استجابة 200 مؤكدة دائمًا.
+    return okResponse({ handled: true, status: decision?.status ?? "unknown" })
+  } catch (error) {
+    // أي خطأ غير متوقع: نسجّله ونُرجع 200 (حتى لا يدخل تليجرام في إعادة محاولات).
+    console.error(`[telegram] فشل غير متوقع في الويب هوك: ${describeError(error)}`)
+    return okResponse({ handled: false, error: "internal" })
   }
-
-  // (2) الرد الفوري على البوت — أول نداء قبل أي عملية أخرى لإزالة الـ spinner.
-  if (token) {
-    await callTelegram(token, "answerCallbackQuery", {
-      callback_query_id: callback.id,
-      text: match ? (approved ? "تم القبول ✅" : "تم الرفض ❌") : "لا يوجد إجراء مطابق",
-      show_alert: false,
-    })
-  }
-
-  // بيانات ضغط غير معروفة: نكتفي بالرد على البوت.
-  if (!match) return NextResponse.json({ ok: true, handled: false })
-
-  // (3) تحديث حالة التذكرة في سجل الخادم (verifyTicket / applyAutomationUpdate).
-  const result = approved ? verifyTicketOnServer(ticketId) : rejectTicketOnServer(ticketId)
-
-  if (!token) return NextResponse.json({ ok: true, handled: true, status: result.status })
-
-  // (4) تعديل نص الرسالة وإزالة الأزرار التفاعلية.
-  const chatId = callback.message?.chat?.id
-  const messageId = callback.message?.message_id
-  if (chatId && messageId) {
-    await updateReceiptMessage(token, chatId, messageId, result.message)
-  }
-
-  // (5) عند القبول: إرسال نفس رمز QR المعروض على الموقع.
-  if (approved && !result.alreadyDecided) {
-    await sendTicketQrImage({ qrPayload: result.record.qrPayload, chatId, caption: qrCaption(result) })
-  }
-
-  return NextResponse.json({ ok: true, handled: true, status: result.status })
 }
 
 /**
