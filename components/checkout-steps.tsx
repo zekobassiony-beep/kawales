@@ -184,8 +184,6 @@ export function PaymentStep({
   totalCents,
   method,
   onChange,
-  paymentRef,
-  onRefChange,
   senderPhone,
   onSenderPhoneChange,
   receiptImage,
@@ -194,8 +192,6 @@ export function PaymentStep({
   totalCents: number
   method: PaymentMethod
   onChange: (method: PaymentMethod) => void
-  paymentRef: string
-  onRefChange: (value: string) => void
   senderPhone: string
   onSenderPhoneChange: (value: string) => void
   receiptImage: string
@@ -264,23 +260,27 @@ export function PaymentStep({
               )}
             </div>
           </div>
-          <input
-            type="text"
-            value={paymentRef}
-            onChange={(event) => onRefChange(event.target.value)}
-            placeholder={selected.referenceLabel}
-            className={FIELD_CLASS}
-          />
-          <input
-            type="tel"
-            value={senderPhone}
-            onChange={(event) => onSenderPhoneChange(event.target.value)}
-            placeholder="رقم الموبايل الذي تم التحويل منه"
-            dir="ltr"
-            className={FIELD_CLASS}
-          />
           <div>
-            <label className="block text-xs text-muted-foreground">إرفاق صورة إيصال التحويل / Screenshot</label>
+            <label className="block text-xs font-medium text-foreground">
+              رقم الموبايل الذي تم التحويل منه
+            </label>
+            <input
+              type="tel"
+              inputMode="tel"
+              value={senderPhone}
+              onChange={(event) => onSenderPhoneChange(event.target.value)}
+              placeholder="مثال: 01012345678"
+              dir="ltr"
+              className={cn(FIELD_CLASS, "mt-1")}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              سنطابقه مع الإيصال لتسريع اعتماد الحجز آليًا.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-foreground">
+              إرفاق صورة إيصال التحويل / Screenshot
+            </label>
             <input
               type="file"
               accept="image/*"

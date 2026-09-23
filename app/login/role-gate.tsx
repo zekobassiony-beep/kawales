@@ -60,25 +60,40 @@ export function RoleGate() {
 
   return (
     <section className="relative isolate min-h-screen w-full overflow-hidden">
-      {/* خلفية ديناميكية بكامل الشاشة: الصور الأربع متراكبة وتتلاشى حسب الدور المُمرَّر عليه */}
+      {/* خلفية ديناميكية بكامل الشاشة: صورة الدور المحدد ظاهرة دائمًا، وصورة الدور
+          الذي يقف عليه الماوس تتلاشى فوقها — فلا تظلم الصفحة أبدًا عند الابتعاد بالماوس. */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
+        {/* الطبقة الأساسية: الدور المحدد (selected) بشفافية كاملة دائمًا */}
+        <RoleImage
+          key={`base-${selected}`}
+          src={ROLE_IMAGES[selected]}
+          alt=""
+          className="opacity-100"
+        />
+
+        {/* طبقة التمرير: تتقاطع بلطف مع الطبقة الأساسية عبر transition-opacity */}
         {ROLE_ORDER.map((role) => (
           <RoleImage
-            key={role}
+            key={`hover-${role}`}
             src={ROLE_IMAGES[role]}
             alt=""
             className={cn(
               "transition-opacity duration-700 ease-in-out",
-              active === role ? "opacity-100" : "opacity-0",
+              hoveredRole === role ? "opacity-100" : "opacity-0",
             )}
           />
         ))}
 
-        {/* طبقة التعتيم الداكنة + توهج النيون (vignette) لإبقاء النصوص والكروت مقروءة */}
-        <div className="absolute inset-0 bg-background/55" />
-        <div className="absolute inset-0 bg-[radial-gradient(120%_100%_at_50%_50%,transparent_35%,rgba(0,0,0,0.6)_100%)]" />
+        {/* تعتيم خفيف + توهج نيون (vignette) — تباين كافٍ دون حجب الصورة */}
+        <div className="absolute inset-0 bg-background/25" />
+        <div className="absolute inset-0 bg-[radial-gradient(120%_100%_at_50%_50%,transparent_45%,rgba(0,0,0,0.45)_100%)]" />
         <div className="absolute inset-0 bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(245,196,81,0.10),transparent_65%)]" />
-        <div className="absolute inset-0 opacity-[0.14] [background-image:linear-gradient(to_right,rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:72px_72px]" />
+
+        {/* حاجز علوي (العنوان والشارة) وحاجز سفلي (البطاقات) لوضوح كامل للنصوص */}
+        <div className="absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-background/85 via-background/40 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-background via-background/75 to-transparent" />
+
+        <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(to_right,rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:72px_72px]" />
         <div
           className="absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl transition-colors duration-700"
           style={{ backgroundColor: `${activeAccent}1f` }}
@@ -87,12 +102,14 @@ export function RoleGate() {
 
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-10 sm:px-6">
         <header className="text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/50 px-4 py-1.5 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/80 px-4 py-1.5 text-xs text-muted-foreground backdrop-blur-md">
             <Drama className="h-3.5 w-3.5 text-primary" />
             بوابة كواليس
           </span>
-          <h1 className="mt-5 font-serif text-4xl font-bold sm:text-5xl">اختر شخصيتك وابدأ</h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
+          <h1 className="mt-5 font-serif text-4xl font-bold [text-shadow:0_2px_20px_rgba(0,0,0,0.7)] sm:text-5xl">
+            اختر شخصيتك وابدأ
+          </h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-foreground/80 [text-shadow:0_1px_12px_rgba(0,0,0,0.65)]">
             أربع مسارات في مسرح واحد: احجز مقعدك، قدّم على الأودشنات، أدِر فرقتك، أو املأ مقاعد مسرحك.
             مرّر على بطاقة لتتوسّع، وانقر عليها لبدء الدخول.
           </p>
@@ -137,7 +154,7 @@ export function RoleGate() {
           ))}
         </div>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
+        <p className="mt-6 text-center text-xs text-foreground/75 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
           الدخول تجريبي (بريد وكلمة مرور أو Google OAuth تجريبي) والجلسة تُحفظ في متصفحك فقط.
         </p>
       </div>
@@ -175,8 +192,9 @@ function RoleCard({
       onClick={() => onSelect(role)}
       className={cn(
         "group relative flex min-h-[136px] min-w-0 basis-0 flex-col items-center justify-between gap-3 overflow-hidden rounded-2xl border p-5 text-center",
+        "bg-card/75 backdrop-blur-md",
         "transition-[flex-grow,border-color,box-shadow] duration-500 ease-out md:min-h-0",
-        active ? "border-transparent" : "border-border/60 hover:border-border",
+        active ? "border-transparent bg-card/90" : "border-border/60 hover:border-border",
       )}
       style={{
         flexGrow: active ? ACTIVE_GROW : 1,

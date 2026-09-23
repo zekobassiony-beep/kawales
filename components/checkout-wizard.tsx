@@ -65,7 +65,6 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
   const [seatIds, setSeatIds] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [method, setMethod] = useState<PaymentMethod>(paymentMethods[0]?.id ?? DEFAULT_PAYMENT_METHOD_ID)
-  const [paymentRef, setPaymentRef] = useState("")
   const [senderPhone, setSenderPhone] = useState("")
   const [receiptImage, setReceiptImage] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -223,8 +222,6 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
             totalCents={totals.totalCents}
             method={method}
             onChange={setMethod}
-            paymentRef={paymentRef}
-            onRefChange={setPaymentRef}
             senderPhone={senderPhone}
             onSenderPhoneChange={setSenderPhone}
             receiptImage={receiptImage}
@@ -268,7 +265,8 @@ export function CheckoutWizard({ event, mode }: { event: EventWithRelations; mod
                   startsAtIso: event.startsAt.toISOString(),
                   totalCents: totals.totalCents,
                   paymentMethod: method,
-                  paymentRef,
+                  // مرجع التحويل الوحيد المطلوب من العميل هو رقم المحوّل نفسه.
+                  paymentRef: senderPhone,
                   senderPhone,
                   receiptImage,
                 })

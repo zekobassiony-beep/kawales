@@ -98,7 +98,7 @@ export function telegramTicketMessage(ticket: Ticket): string {
     `المقاعد: ${ticket.seats.join("، ")}`,
     `الإجمالي: ${formatPiastres(ticket.totalCents)}`,
     `طريقة الدفع: ${paymentMethodLabel(ticket.paymentMethod)}`,
-    `مرجع التحويل: ${ticket.paymentRef}`,
+    `رقم المحوّل: ${ticket.senderPhone ?? ticket.paymentRef}`,
   ].join("\n")
 }
 
