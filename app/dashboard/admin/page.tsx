@@ -1,6 +1,8 @@
 import { checkAdminAccess, listAdminEmails } from "@/lib/auth"
+import { getEvents } from "@/lib/queries"
 import { AdminConsole } from "@/app/dashboard/admin/admin-console"
 import { NoAccessPanel } from "@/app/dashboard/admin/no-access"
+import type { HQEventInput } from "@/lib/hq-metrics"
 
 export const dynamic = "force-dynamic"
 
@@ -25,6 +27,19 @@ export default async function AdminDashboardPage() {
 
   const list = await listAdminEmails()
 
+  // بيانات العروض/المسارح/الفرق لمؤشرات ورسوم لوحة السوبر أدمن.
+  const events = await getEvents()
+  const hqEvents: HQEventInput[] = events.map((event) => ({
+    id: event.id,
+    title: event.title,
+    status: event.status,
+    startsAtIso: event.startsAt.toISOString(),
+    city: event.venue.city,
+    venueName: event.venue.name,
+    venueCapacity: Math.max(1, event.venue.rows * event.venue.seatsPerRow),
+    minPriceCents: Math.min(...event.priceTiers.map((tier) => tier.priceCents), 0),
+  }))
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <AdminConsole
@@ -32,6 +47,7 @@ export default async function AdminDashboardPage() {
         tableReady={list.tableReady}
         adminEmail={access.email}
         isMaster={access.master}
+        events={hqEvents}
       />
     </div>
   )

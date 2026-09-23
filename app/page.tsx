@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { Search, Armchair, Ticket, Drama } from "lucide-react"
-import { getEvents, getFeaturedEvents, getTroupes } from "@/lib/queries"
+import { getEvents, getFeaturedEvents, getSoldSeatCounts, getTroupes } from "@/lib/queries"
 import { HeroCarousel } from "@/components/hero-carousel"
 import { ShowCard } from "@/components/show-card"
 import { LiveShowsGrid } from "@/components/live-events-panel"
@@ -17,6 +17,9 @@ export default async function HomePage() {
   const upcoming = events
     .filter((event) => new Date(event.startsAt).getTime() > Date.now())
     .slice(0, 4)
+
+  // عدد المقاعد المباعة لكل عرض — لتشغيل شريط الإشغال في الكروت.
+  const soldCounts = await getSoldSeatCounts(upcoming.map((event) => event.id))
 
   return (
     <div>
@@ -43,7 +46,7 @@ export default async function HomePage() {
 
         <div className="mt-8 grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-4">
           {upcoming.map((event) => (
-            <ShowCard key={event.id} event={event} />
+            <ShowCard key={event.id} event={event} sold={soldCounts.get(event.id) ?? 0} />
           ))}
         </div>
 

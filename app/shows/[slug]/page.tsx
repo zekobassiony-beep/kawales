@@ -1,230 +1,230 @@
-import Link from "next/link"
 import Image from "next/image"
 import { notFound } from "next/navigation"
-import { CalendarDays, Clock, MapPin, Languages, ArrowRight, Ticket } from "lucide-react"
-import { getEventBySlug } from "@/lib/queries"
-import { formatDate, formatTime, formatDuration, formatPrice } from "@/lib/format"
+import { CalendarDays, Languages, MapPin, Play, Star, Users } from "lucide-react"
+import { getEventBySlug, getEvents, getSoldSeatCounts } from "@/lib/queries"
+import { formatDate, formatDuration, formatTime } from "@/lib/format"
 import { bookingBlockedReason } from "@/lib/booking-rules"
-import { ShowReviewsList, VerifiedReviewForm } from "@/components/verified-review-form"
+import { cn } from "@/lib/utils"
+import { ageRatingFor, buildShowtimeCards, mapsUrlFor, occupancyInfo } from "@/lib/show-detail"
+import { ShowTabs, ShowCastPanel } from "@/app/shows/[slug]/show-tabs"
+import { ShowRatingStats, ShowReviewsPanel } from "@/app/shows/[slug]/show-reviews-panel"
+import { ShowDetailsPanel } from "@/app/shows/[slug]/show-details-panel"
+import { ShowBookingBox } from "@/app/shows/[slug]/show-booking-box"
+import { ShowSidebarExtras } from "@/app/shows/[slug]/show-booking-parts"
 
 export const dynamic = "force-dynamic"
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>
-}) {
+const CARD = "rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur"
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
   const event = await getEventBySlug(slug)
   if (!event) return { title: "العرض غير موجود — كواليس" }
-  return {
-    title: `${event.title} — كواليس`,
-    description: event.tagline,
-  }
+  return { title: `${event.title} — كواليس`, description: event.tagline }
 }
 
-export default async function ShowDetailPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>
-}) {
+export default async function ShowDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
   const event = await getEventBySlug(slug)
   if (!event) notFound()
 
-  const minPrice = Math.min(...event.priceTiers.map((t) => t.priceCents))
+  // العروض الأخرى لنفس الفرقة تُستخدم كمواعيد إضافية، ونحسب الإشغال الفعلي.
+  const allEvents = await getEvents()
+  const troupeEvents = allEvents.filter((item) => item.troupe.id === event.troupe.id)
+  const soldCounts = await getSoldSeatCounts([...new Set([event.id, ...troupeEvents.map((item) => item.id)])])
+
+  const capacity = Math.max(1, event.venue.rows * event.venue.seatsPerRow)
+  const sold = soldCounts.get(event.id) ?? 0
+  const minPrice = Math.min(...event.priceTiers.map((tier) => tier.priceCents), 0)
+  const occupancy = occupancyInfo(sold, capacity)
   const blocked = bookingBlockedReason(event)
+  const ageRating = ageRatingFor({ category: event.category, durationMinutes: event.durationMinutes })
+  const mapsUrl = mapsUrlFor(event.venue)
+
+  const showtimes = buildShowtimeCards(
+    troupeEvents.map((item) => ({
+      id: item.id,
+      slug: item.slug,
+      startsAt: item.startsAt,
+      sold: soldCounts.get(item.id) ?? 0,
+      capacity: Math.max(1, item.venue.rows * item.venue.seatsPerRow),
+    })),
+    event.id,
+    formatDate,
+    formatTime,
+  )
+
+  const tags = [event.category, "مسرح", event.language].filter((tag) => tag.trim().length > 0)
+  const organizer = { phone: event.troupe.city ? "+201000000000" : "+201000000000", email: `${event.troupe.slug}@kawalees.test` }
 
   return (
-    <div>
+    <div className="pb-16">
       {/* Hero */}
-      <div className="relative h-[46vh] min-h-[340px] w-full overflow-hidden">
+      <section className="relative min-h-[420px] w-full overflow-hidden">
         <Image
           src={event.heroUrl ?? event.posterUrl ?? "/placeholder.svg"}
-          alt={`${event.title} stage scene`}
+          alt={`مشهد من عرض ${event.title}`}
           fill
           priority
           sizes="100vw"
-          className="object-cover"
+          className="object-cover opacity-60"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/20" />
-        <div className="absolute inset-x-0 bottom-0">
-          <div className="mx-auto max-w-6xl px-4 pb-8 sm:px-6">
-            <Link
-              href="/shows"
-              className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ArrowRight className="h-4 w-4" />
-              كل العروض
-            </Link>
-            <p className="text-sm font-medium uppercase tracking-wide text-primary">
-              {event.troupe.name}
-            </p>
-            <h1 className="mt-1 font-serif text-4xl font-bold leading-tight sm:text-5xl text-balance">
-              {event.title}
-            </h1>
-            <p className="mt-2 max-w-xl text-muted-foreground text-pretty">
-              {event.tagline}
-            </p>
-          </div>
-        </div>
-      </div>
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-background/40" />
 
-      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-        <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
-          {/* Main */}
-          <div>
-            <div className="flex flex-wrap gap-x-8 gap-y-4 rounded-xl border border-border/60 bg-card p-6">
-              <Fact icon={CalendarDays} label="التاريخ" value={formatDate(event.startsAt)} />
-              <Fact icon={Clock} label="موعد العرض" value={formatTime(event.startsAt)} />
-              <Fact icon={Clock} label="مدة العرض" value={formatDuration(event.durationMinutes)} />
-              <Fact icon={Languages} label="اللغة" value={event.language} />
-            </div>
+        <button
+          type="button"
+          aria-label="تشغيل التريلر"
+          className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-amber-500/50 bg-zinc-950/70 text-amber-400 shadow-[0_0_40px_-10px_rgba(245,158,11,0.95)] backdrop-blur transition-transform hover:scale-105"
+        >
+          <Play className="h-6 w-6" />
+        </button>
 
-            <section className="mt-10">
-              <h2 className="font-serif text-2xl font-semibold">عن العرض</h2>
-              <p className="mt-3 leading-relaxed text-muted-foreground">
-                {event.description}
-              </p>
-            </section>
+        <div className="relative mx-auto max-w-6xl px-4 pb-8 pt-24 sm:px-6">
+          <p className="text-sm font-medium uppercase tracking-[0.2em] text-amber-400">{event.troupe.name}</p>
+          <h1 className="mt-2 font-serif text-4xl font-bold text-zinc-50 sm:text-5xl">{event.title}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-300">{event.tagline}</p>
 
-            <section className="mt-10">
-              <h2 className="font-serif text-2xl font-semibold">المسرح</h2>
-              <div className="mt-3 flex items-start gap-3 rounded-xl border border-border/60 bg-card p-5">
-                <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <MapPin className="h-5 w-5" />
-                </span>
-                <div>
-                  <p className="font-medium">{event.venue.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {event.venue.address}
-                  </p>
-                  <p className="text-sm text-muted-foreground">{event.venue.city}</p>
-                </div>
-              </div>
-            </section>
-
-            <section className="mt-10">
-              <h2 className="font-serif text-2xl font-semibold">
-                عن فرقة {event.troupe.name}
-              </h2>
-              <p className="mt-3 leading-relaxed text-muted-foreground">
-                {event.troupe.bio}
-              </p>
-            </section>
-          </div>
-
-          {/* Booking sidebar */}
-          <aside className="lg:sticky lg:top-24 lg:self-start">
-            <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-              <div className="relative aspect-[3/4] w-full">
-                <Image
-                  src={event.posterUrl ?? "/placeholder.svg"}
-                  alt={`ملصق عرض ${event.title}`}
-                  fill
-                  sizes="360px"
-                  className="object-cover"
-                />
-              </div>
-              <div className="p-5">
-                <p className="text-sm text-muted-foreground">
-                  تبدأ التذاكر من{" "}
-                  <span className="text-lg font-semibold text-foreground">
-                    {formatPrice(minPrice)}
-                  </span>
-                </p>
-
-                <ul className="mt-4 space-y-2">
-                  {event.priceTiers.map((tier) => (
-                    <li
-                      key={tier.id}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="h-3 w-3 rounded-full"
-                          style={{ backgroundColor: tier.color }}
-                        />
-                        {tier.name}
-                      </span>
-                      <span className="font-medium">
-                        {formatPrice(tier.priceCents)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                {blocked ? (
-                  <p className="mt-6 rounded-full border border-border/60 bg-secondary/40 px-6 py-3 text-center text-sm text-muted-foreground">
-                    {blocked}
-                  </p>
-                ) : (
-                  <>
-                    <Link
-                      href={`/shows/${event.slug}/book`}
-                      className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-                    >
-                      <Ticket className="h-4 w-4" />
-                      الحجز والدفع المباشر
-                    </Link>
-                    <p className="mt-3 text-center text-xs text-muted-foreground">
-                      اختر مقعدك أو فئتك ثم ادفع بفودافون كاش أو انستا باي · تذكرة رقمية فورية برمز QR
-                    </p>
-                  </>
-                )}
-              </div>
-            </div>
-          </aside>
-        </div>
-      </div>
-
-      {/* التقييمات الموثقة (Verified Reviews) */}
-      <section className="border-t border-border/60">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-          <h2 className="font-serif text-2xl font-bold">تقييمات الجمهور</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            كل تقييم هنا موثق بتذكرة سُجّل حضورها عند بوابة المسرح — شفافية كاملة بلا تقييمات وهمية.
-          </p>
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_380px]">
-            <ShowReviewsList showId={String(event.id)} />
-            <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-              <VerifiedReviewForm showId={String(event.id)} showTitle={event.title} />
-              <div className="rounded-xl border border-border/60 bg-card p-4 text-xs text-muted-foreground">
-                <p className="font-semibold text-foreground">كيف يُوثَّق التقييم؟</p>
-                <ol className="mt-2 list-inside list-decimal space-y-1">
-                  <li>احجز تذكرتك بفودافون كاش أو انستا باي واعتمد التحويل عبر بوت كواليس.</li>
-                  <li>امسح رمز QR عند بوابة المسرح ليُسجَّل حضورك.</li>
-                  <li>يظهر لك نموذج التقييم بالنجوم مباشرة بعد الحضور.</li>
-                </ol>
-              </div>
-            </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            {tags.map((tag) => (
+              <span key={tag} className="rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-zinc-300">
+                {tag}
+              </span>
+            ))}
+            <ShowRatingStats showId={String(event.id)} />
+            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-zinc-300">
+              ⏱ {formatDuration(event.durationMinutes)}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 font-semibold text-amber-300">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+              {ageRating}
+            </span>
           </div>
         </div>
       </section>
+
+      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+        {/* شبكة المعلومات السريعة (4 كروت) */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <InfoCard icon={MapPin} label="المسرح" value={`${event.venue.name} — ${event.venue.city}`} />
+          <InfoCard icon={CalendarDays} label="الموسم" value={formatDate(event.startsAt)} />
+          <InfoCard icon={Users} label="الفرقة" value={event.troupe.name} />
+          <InfoCard icon={Languages} label="اللغة" value={event.language} />
+        </div>
+
+        {/* تخطيط عمودين على الشاشات الكبيرة · عمود واحد على الموبايل
+            (صندوق الحجز آخر عنصر في DOM ليظهر في نهاية الصفحة على الموبايل) */}
+        <div className="mt-10 flex flex-col gap-10 lg:grid lg:grid-cols-[1fr_380px] lg:items-start">
+          <div className="min-w-0 space-y-10">
+            <ShowTabs
+              castCount={0}
+              reviewCount={0}
+              details={
+                <ShowDetailsPanel
+                  description={event.description}
+                  troupeName={event.troupe.name}
+                  troupeBio={event.troupe.bio}
+                  showtimes={showtimes}
+                  venue={event.venue}
+                  mapsUrl={mapsUrl}
+                  minPriceCents={minPrice}
+                />
+              }
+              cast={<ShowCastPanel seed={event.title} />}
+              reviews={<ShowReviewsPanel showId={String(event.id)} showTitle={event.title} />}
+            />
+
+            {/* خريطة المسرح (معاينة الإشغال) */}
+            <section className={cn(CARD, "p-6")}>
+              <h2 className="flex items-center gap-2 font-serif text-xl font-semibold text-zinc-100">
+                <MapPin className="h-5 w-5 text-amber-400" />
+                خريطة المسرح
+              </h2>
+              <p className="mt-2 text-xs text-zinc-500">
+                {event.venue.name} — {event.venue.rows} صفوف × {event.venue.seatsPerRow} مقعد ·{" "}
+                <span className={occupancy.remaining === 0 ? "text-red-400" : "text-amber-300"}>
+                  {occupancy.remaining} مقعد متبقٍ
+                </span>
+              </p>
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <SeatPreview rows={event.venue.rows} seatsPerRow={event.venue.seatsPerRow} sold={sold} />
+              </div>
+            </section>
+
+            {/* التقييمات العامة (تحت الخريطة) */}
+            <section className={cn(CARD, "p-6")}>
+              <h2 className="font-serif text-xl font-semibold text-zinc-100">تقييمات الجمهور</h2>
+              <p className="mt-2 text-xs text-zinc-500">
+                كل تقييم هنا موثق بتذكرة سُجّل حضورها عند البوابة — بلا تقييمات وهمية.
+              </p>
+              <div className="mt-4">
+                <ShowReviewsPanel showId={String(event.id)} showTitle={event.title} />
+              </div>
+            </section>
+          </div>
+
+          {/* صندوق الحجز (Sticky على الشاشات الكبيرة) */}
+          <aside className="lg:sticky lg:top-24 lg:self-start">
+            <ShowBookingBox
+              slug={event.slug}
+              title={event.title}
+              tiers={event.priceTiers}
+              capacity={capacity}
+              sold={sold}
+              blockedReason={blocked}
+            />
+            <ShowSidebarExtras organizer={organizer} initialWaitlist={12} />
+          </aside>
+        </div>
+      </div>
     </div>
   )
 }
 
-function Fact({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof CalendarDays
-  label: string
-  value: string
-}) {
+/** معاينة مبسطة لتخطيط الكراسي مع إظهار المباع/المتبقي تقريبيًا. */
+function SeatPreview({ rows, seatsPerRow, sold }: { rows: number; seatsPerRow: number; sold: number }) {
+  const total = Math.max(1, rows * seatsPerRow)
+  const soldRatio = Math.min(1, sold / total)
   return (
-    <div className="flex items-center gap-3">
-      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Icon className="h-4 w-4" />
-      </span>
-      <div>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          {label}
-        </p>
-        <p className="text-sm font-medium">{value}</p>
+    <div className="min-w-[520px] space-y-1.5" dir="ltr">
+      <p className="mb-2 rounded-lg bg-amber-500/15 py-1 text-center text-[10px] font-semibold text-amber-300">المسرح / Stage</p>
+      {Array.from({ length: rows }, (_, rowIndex) => (
+        <div key={rowIndex} className="flex items-center justify-center gap-1">
+          {Array.from({ length: seatsPerRow }, (_, seatIndex) => {
+            const position = (rowIndex * seatsPerRow + seatIndex) / total
+            const taken = position < soldRatio
+            return (
+              <span
+                key={seatIndex}
+                className={cn(
+                  "h-4 w-4 rounded-[4px] border",
+                  taken ? "border-red-500/50 bg-red-500/40" : "border-zinc-700 bg-zinc-800/70",
+                )}
+              />
+            )
+          })}
+        </div>
+      ))}
+      <div className="mt-3 flex justify-center gap-4 text-[10px] text-zinc-500">
+        <span className="flex items-center gap-1">
+          <span className="h-3 w-3 rounded-[4px] border border-zinc-700 bg-zinc-800/70" /> متاح
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-3 w-3 rounded-[4px] border border-red-500/50 bg-red-500/40" /> مباع
+        </span>
       </div>
+    </div>
+  )
+}
+
+
+function InfoCard({ icon: Icon, label, value }: { icon: typeof MapPin; label: string; value: string }) {
+  return (
+    <div className={`${CARD} p-4 transition-colors hover:border-amber-500/30`}>
+      <p className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+        <Icon className="h-3.5 w-3.5 text-amber-400" />
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-semibold text-zinc-100">{value}</p>
     </div>
   )
 }

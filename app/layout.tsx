@@ -4,6 +4,7 @@ import { Playfair_Display, Inter } from 'next/font/google'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { FlashBanner } from '@/components/flash-banner'
+import { SupabaseSessionSync } from '@/components/supabase-session-sync'
 import './globals.css'
 
 const playfair = Playfair_Display({
@@ -37,6 +38,7 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" className={`${playfair.variable} ${inter.variable} bg-background`}>
       <body className="antialiased font-sans min-h-screen flex flex-col">
+        <SupabaseSessionSync />
         <FlashBanner />
         <SiteHeader />
         <main className="flex-1">{children}</main>

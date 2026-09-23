@@ -1,9 +1,10 @@
 import Link from "next/link"
 import { ArrowRight, DoorOpen, ScanLine } from "lucide-react"
 import { mockVenueSchedule } from "@/lib/dashboards"
-import { getEvents } from "@/lib/queries"
+import { getEvents, getVenues } from "@/lib/queries"
 import { SectionTitle } from "@/app/dashboard/ui"
 import { VenueStats } from "@/app/dashboard/venue/venue-stats"
+import { VenueMapsLinks, type VenueMapsRow } from "@/app/dashboard/venue/venue-maps-link"
 import { VenueLayoutBuilder } from "@/components/venue-layout-builder"
 import { VenueManualCalendar } from "@/components/venue-manual-calendar"
 
@@ -26,6 +27,28 @@ export default async function VenueDashboardPage() {
 
   const totalCapacity = ROWS * SEATS_PER_ROW
   const ticketsSold = mockVenueSchedule.reduce((sum, show) => sum + show.seats, 0)
+
+  // مسارح قاعدة البيانات + روابط الخرائط الخاصة بها.
+  const venueRecords = await getVenues()
+  const venueMapsRows: VenueMapsRow[] = (
+    venueRecords.length > 0
+      ? venueRecords.map((venue) => ({
+          id: venue.id,
+          name: venue.name,
+          city: venue.city,
+          address: venue.address,
+          googleMapsUrl: venue.googleMapsUrl ?? null,
+        }))
+      : [
+          {
+            id: VENUE_ID,
+            name: venueName,
+            city: venueCity,
+            address: venueEvents[0]?.venue.address ?? "وسط البلد",
+            googleMapsUrl: venueEvents[0]?.venue.googleMapsUrl ?? null,
+          },
+        ]
+  ).sort((a, b) => a.name.localeCompare(b.name, "ar"))
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -78,6 +101,16 @@ export default async function VenueDashboardPage() {
         </p>
         <div className="mt-4">
           <VenueLayoutBuilder defaultCapacity={totalCapacity} />
+        </div>
+      </section>
+
+      <section className="mt-12">
+        <SectionTitle>رابط الخريطة (Google Maps) للمسارح</SectionTitle>
+        <p className="mt-2 text-sm text-muted-foreground">
+          ضع رابط اللوكيشن المباشر ليظهر كزر «افتح في خريطة» داخل صفحة العرض للجمهور.
+        </p>
+        <div className="mt-4">
+          <VenueMapsLinks venues={venueMapsRows} />
         </div>
       </section>
 

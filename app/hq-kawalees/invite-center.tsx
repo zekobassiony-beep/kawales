@@ -1,28 +1,31 @@
 "use client"
 
 import { useState } from "react"
-import { BadgeCheck, Copy, KeyRound, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { KeyRound, Plus, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { StatusBadge } from "@/app/dashboard/ui"
 import {
   INVITE_KIND_LABELS,
-  INVITE_STATUS_LABELS,
-  INVITE_STATUS_TONES,
   addInviteCode,
   generateInviteCode,
   inviteCodeStats,
-  releaseInviteCode,
-  removeInviteCode,
-  revokeInviteCode,
   useInviteCodes,
   type InviteCodeKind,
 } from "@/lib/invite-codes"
 import { BadgeCenter } from "@/app/hq-kawalees/badge-center"
+import { InviteCodesTable } from "@/app/hq-kawalees/invite-center-parts"
 
+/**
+ * أكواد الانضمام والتوثيق — Dark Graphite & Gold:
+ * شبكة KPI بأرقام ذهبية + كارت توليد احترافي + جدول تتبّع + مركز التوثيق.
+ * المنطق كما هو تمامًا (`generateInviteCode` / `addInviteCode` / release / revoke / remove).
+ */
+
+const CARD = "rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur transition-colors"
 const FIELD =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
+  "w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-amber-500"
+const GOLD_BTN =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-zinc-950 transition-colors hover:bg-amber-400 disabled:opacity-50"
 
-/** مركز أكواد الانضمام: توليد، تتبّع الحالة، والجهة المخصص لها الكود. */
 export function InviteCenter() {
   const codes = useInviteCodes()
   const stats = inviteCodeStats(codes)
@@ -33,203 +36,125 @@ export function InviteCenter() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div>
-          <h2 className="flex items-center gap-2 font-serif text-xl font-semibold">
-            <KeyRound className="h-5 w-5 text-primary" />
-            أكواد الانضمام للمسارح والفرق
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            الأكواد المتاحة فقط هي التي تُقبل في تسجيل المسارح والفرق — والباقي يُوسم كمستعمل أو ملغى.
-          </p>
-        </div>
+      <div>
+        <h2 className="flex items-center gap-2 font-serif text-xl font-semibold text-zinc-100">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400">
+            <KeyRound className="h-4 w-4" />
+          </span>
+          أكواد الانضمام والتوثيق
+        </h2>
+        <p className="mt-1.5 text-xs text-zinc-400">
+          الأكواد المتاحة فقط هي التي تُقبل في تسجيل المسارح والفرق — والباقي يُوسم كمستعمل أو ملغى.
+        </p>
+      </div>
 
-        <div className="grid gap-3 sm:grid-cols-4">
-          {[
-            { label: "إجمالي الأكواد", value: stats.total },
-            { label: "متاحة", value: stats.available },
-            { label: "مستعملة", value: stats.used },
-            { label: "ملغاة", value: stats.revoked },
-          ].map((card) => (
-            <div key={card.label} className="rounded-xl border border-border/60 bg-card p-3">
-              <p className="text-[11px] text-muted-foreground">{card.label}</p>
-              <p className="font-serif text-xl font-bold">{card.value}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-3 rounded-xl border border-primary/40 bg-card p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <label className="text-xs text-muted-foreground">
-              نوع الكود
-              <select
-                value={kind}
-                onChange={(event) => setKind(event.target.value as InviteCodeKind)}
-                className={cn(FIELD, "mt-1")}
-              >
-                {(Object.keys(INVITE_KIND_LABELS) as InviteCodeKind[]).map((value) => (
-                  <option key={value} value={value}>
-                    {INVITE_KIND_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-muted-foreground">
-              الجهة المخصص لها
-              <input
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder="مثال: مسرح الطليعة"
-                className={cn(FIELD, "mt-1")}
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={() => {
-                  const invite = generateInviteCode(kind, label)
-                  setNotice(`تم توليد الكود ${invite.code} — متاح الآن.`)
-                  setLabel("")
-                }}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                توليد كود جديد
-              </button>
-            </div>
+      {/* شبكة KPI (4 أسرّة بأرقام ذهبية) */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "إجمالي الأكواد", value: stats.total, hint: "كل الأكواد المسجّلة" },
+          { label: "متاحة", value: stats.available, hint: "جاهزة للتسجيل الآن" },
+          { label: "مستعملة", value: stats.used, hint: "استُخدمت في تسجيل" },
+          { label: "ملغاة", value: stats.revoked, hint: "أُلغيت يدويًا" },
+        ].map((card) => (
+          <div key={card.label} className={cn(CARD, "p-5 hover:border-amber-500/30")}>
+            <p className="text-xs font-medium text-zinc-400">{card.label}</p>
+            <p className="mt-1 font-serif text-4xl font-bold text-amber-400">{card.value}</p>
+            <p className="mt-1.5 text-[11px] text-zinc-500">{card.hint}</p>
           </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="min-w-40 flex-1 text-xs text-muted-foreground">
-              أو أضف كودًا مخصّصًا
-              <input
-                value={customCode}
-                onChange={(event) => setCustomCode(event.target.value.toUpperCase())}
-                placeholder="KAWALEES-2026"
-                dir="ltr"
-                className={cn(FIELD, "mt-1 font-mono")}
-              />
-            </label>
+        ))}
+      </div>
+
+      {/* كارت إنشاء وتوليد الأكواد */}
+      <div className={cn(CARD, "space-y-4 p-5")}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 font-serif text-base font-semibold text-zinc-100">
+            <Sparkles className="h-4 w-4 text-amber-400" />
+            إنشاء كود انضمام جديد
+          </h3>
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-400">
+            توليد فوري
+          </span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="text-xs text-zinc-400">
+            نوع الكود
+            <select
+              value={kind}
+              onChange={(event) => setKind(event.target.value as InviteCodeKind)}
+              className={cn(FIELD, "mt-1.5")}
+            >
+              {(Object.keys(INVITE_KIND_LABELS) as InviteCodeKind[]).map((value) => (
+                <option key={value} value={value}>
+                  {INVITE_KIND_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-zinc-400">
+            الجهة المخصص لها
+            <input
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="مثال: مسرح الطليعة"
+              className={cn(FIELD, "mt-1.5")}
+            />
+          </label>
+          <div className="flex items-end">
             <button
               type="button"
               onClick={() => {
-                const invite = addInviteCode({ code: customCode, kind, label })
-                setNotice(invite ? `تمت إضافة الكود ${invite.code}.` : "الكود غير صالح أو موجود مسبقًا.")
-                setCustomCode("")
+                const invite = generateInviteCode(kind, label)
+                setNotice(`تم توليد الكود ${invite.code} — متاح الآن.`)
+                setLabel("")
               }}
-              className="rounded-full border border-border/60 px-4 py-2 text-xs transition-colors hover:bg-secondary"
+              className={cn(GOLD_BTN, "w-full")}
             >
-              إضافة الكود
+              <Plus className="h-4 w-4" />
+              توليد كود جديد
             </button>
           </div>
-          {notice && (
-            <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200">
-              {notice}
-            </p>
-          )}
         </div>
+
+        <div className="flex flex-wrap items-end gap-2 border-t border-zinc-800 pt-4">
+          <label className="min-w-48 flex-1 text-xs text-zinc-400">
+            أو أضف كودًا مخصّصًا
+            <input
+              value={customCode}
+              onChange={(event) => setCustomCode(event.target.value.toUpperCase())}
+              placeholder="KAWALEES-2026"
+              dir="ltr"
+              className={cn(FIELD, "mt-1.5 font-mono")}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const invite = addInviteCode({ code: customCode, kind, label })
+              setNotice(invite ? `تمت إضافة الكود ${invite.code}.` : "الكود غير صالح أو موجود مسبقًا.")
+              setCustomCode("")
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60"
+          >
+            <Plus className="h-4 w-4" />
+            إضافة الكود
+          </button>
+        </div>
+
+        {notice && (
+          <p
+            role="status"
+            className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-300 backdrop-blur"
+          >
+            {notice}
+          </p>
+        )}
       </div>
 
-      <InviteCodesTable
-        codes={codes}
-        onNotice={setNotice}
-      />
+      <InviteCodesTable codes={codes} onNotice={setNotice} />
 
       <BadgeCenter />
     </div>
   )
-
-/** جدول تتبّع أكواد الدعوة وحالتها. */
-function InviteCodesTable({
-  codes,
-  onNotice,
-}: {
-  codes: ReturnType<typeof useInviteCodes>
-  onNotice: (text: string) => void
-}) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border/60 bg-card">
-      <table className="w-full min-w-[640px] text-sm">
-        <thead>
-          <tr className="border-b border-border/60 text-right text-xs text-muted-foreground">
-            <th className="px-4 py-3 font-medium">الكود</th>
-            <th className="px-4 py-3 font-medium">النوع</th>
-            <th className="px-4 py-3 font-medium">الجهة المخصص لها</th>
-            <th className="px-4 py-3 font-medium">الحالة</th>
-            <th className="px-4 py-3 font-medium">إجراءات</th>
-          </tr>
-        </thead>
-        <tbody>
-          {codes.map((item) => (
-            <tr key={item.code} className="border-b border-border/40 last:border-0">
-              <td className="px-4 py-3 font-mono text-xs" dir="ltr">
-                {item.code}
-              </td>
-              <td className="px-4 py-3 text-xs">{INVITE_KIND_LABELS[item.kind]}</td>
-              <td className="px-4 py-3 text-xs">
-                {item.label}
-                {item.usedBy && <span className="block text-[10px] text-muted-foreground">استُعمل بواسطة: {item.usedBy}</span>}
-              </td>
-              <td className="px-4 py-3">
-                <StatusBadge tone={INVITE_STATUS_TONES[item.status]}>{INVITE_STATUS_LABELS[item.status]}</StatusBadge>
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    aria-label={`نسخ ${item.code}`}
-                    onClick={() => {
-                      void navigator.clipboard.writeText(item.code).catch(() => undefined)
-                      onNotice(`تم نسخ الكود ${item.code}.`)
-                    }}
-                    className="rounded-full border border-border/60 p-1.5 text-muted-foreground transition-colors hover:bg-secondary"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                  {item.status !== "available" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        releaseInviteCode(item.code)
-                        onNotice(`تم تحرير الكود ${item.code} — متاح من جديد.`)
-                      }}
-                      className="inline-flex items-center gap-1 rounded-full border border-emerald-500/50 px-2.5 py-1 text-[11px] text-emerald-200 transition-colors hover:bg-emerald-500/10"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                      تحرير
-                    </button>
-                  )}
-                  {item.status !== "revoked" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        revokeInviteCode(item.code)
-                        onNotice(`تم إلغاء الكود ${item.code}.`)
-                      }}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 px-2.5 py-1 text-[11px] text-amber-200 transition-colors hover:bg-amber-500/10"
-                    >
-                      <BadgeCheck className="h-3 w-3" />
-                      إلغاء
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    aria-label={`حذف ${item.code}`}
-                    onClick={() => {
-                      removeInviteCode(item.code)
-                      onNotice(`تم حذف الكود ${item.code}.`)
-                    }}
-                    className="rounded-full border border-destructive/50 p-1.5 text-destructive-foreground transition-colors hover:bg-destructive/10"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 }
 
-}

@@ -26,6 +26,8 @@ export type EventWithRelations = {
     slug: string
     city: string
     address: string
+    /** رابط Google Maps المباشر (اختياري) — يُدخله مدير المسرح. */
+    googleMapsUrl: string | null
     rows: number
     seatsPerRow: number
   }
@@ -87,6 +89,7 @@ const mockEvents: EventWithRelations[] = [
       slug: "hanager-arts-centre",
       city: "القاهرة",
       address: "أرض أوبرا الروضي، الزمالك",
+      googleMapsUrl: "https://maps.google.com/?q=Hanager+Arts+Centre+Cairo",
       rows: 8,
       seatsPerRow: 12,
     },
@@ -123,6 +126,7 @@ const mockEvents: EventWithRelations[] = [
       slug: "sayed-darwish-theatre",
       city: "الإسكندرية",
       address: "شارع فؤاد، وسط البلد",
+      googleMapsUrl: null,
       rows: 8,
       seatsPerRow: 12,
     },
@@ -158,11 +162,42 @@ function mapRow(row: any): EventWithRelations {
       slug: row.venue.slug,
       city: row.venue.city,
       address: row.venue.address,
+      googleMapsUrl: row.venue.googleMapsUrl ?? null,
       rows: row.venue.rows,
       seatsPerRow: row.venue.seatsPerRow,
     },
   }
 }
+
+/**
+ * عدد المقاعد المباعة لكل عرض (مجمّعة) — تُستخدم في شريط الإشغال بكروت العروض
+ * وفي صفحة العرض. تعيد خريطة فارغة عند غياب قاعدة البيانات.
+ */
+export async function getSoldSeatCounts(eventIds: number[]): Promise<Map<number, number>> {
+  if (eventIds.length === 0) return new Map()
+  return withDbFallback(
+    async () => {
+      const rows = await db
+        .select({ eventId: bookedSeats.eventId, seatId: bookedSeats.seatId })
+        .from(bookedSeats)
+      const counts = new Map<number, number>()
+      for (const row of rows) {
+        if (!eventIds.includes(row.eventId)) continue
+        counts.set(row.eventId, (counts.get(row.eventId) ?? 0) + 1)
+      }
+      return counts
+    },
+    new Map<number, number>(),
+  )
+}
+
+/** كل المسارح المسجّلة (مع رابط الخريطة) — لاستخدامها في لوحة مدير المسرح والصفحة الرئيسية. */
+export const getVenues = cache(async function getVenues() {
+  return withDbFallback(
+    () => db.select().from(venues).orderBy(asc(venues.name)),
+    [] as (typeof venues.$inferSelect)[],
+  )
+})
 
 async function withDbFallback<T>(query: () => Promise<T>, fallback: T): Promise<T> {
   if (!getConnectionString()) {

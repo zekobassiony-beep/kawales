@@ -10,6 +10,8 @@ import {
   type AccountRole,
 } from "@/lib/roles"
 import { SESSION_EMAIL_COOKIE } from "@/lib/auth-constants"
+import { signOutSupabase } from "@/lib/supabase/auth-client"
+import type { User } from "@supabase/supabase-js"
 
 /**
  * جلسة الحساب التجريبية (Mock session).
@@ -259,7 +261,59 @@ export function updateProfile(patch: Partial<SessionProfile>): SessionUser | nul
 }
 
 export function signOut(): void {
+  // إنهاء جلسة Supabase الرسمية أيضًا (كوكيز) بجانب الجلسة المحلية.
+  void signOutSupabase()
   persistSession(null)
+}
+
+/**
+ * يزامن مستخدم Supabase Auth الرسمي مع الجلسة المحلية (مصدر واجهة المنصة):
+ * يحافظ على الفئة (role) والبروفايل إن كانت الجلسة المحلية لنفس البريد،
+ * ويستنبط الاسم والصورة من بيانات Supabase (Google/Email).
+ */
+export function applySupabaseUser(
+  user: Pick<User, "email" | "user_metadata" | "app_metadata"> | null,
+  preferredRole?: AccountRole,
+): SessionUser | null {
+  if (!user?.email) return null
+  const email = user.email.trim().toLowerCase()
+  const current = readSession()
+  const sameUser = Boolean(current && current.email.trim().toLowerCase() === email)
+
+  const metadata = (user.user_metadata ?? {}) as Record<string, unknown>
+  const pickText = (values: unknown[]): string =>
+    values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? ""
+
+  const fullName = pickText([metadata.full_name, metadata.name, metadata.user_name])
+  const avatarUrl = pickText([metadata.avatar_url, metadata.picture])
+  const providerRaw = pickText([(user.app_metadata ?? {})["provider"]])
+  const provider: AuthProvider = providerRaw === "google" ? "google" : "password"
+
+  const role: AccountRole = sameUser && current ? current.role : (preferredRole ?? "customer")
+  const profile: SessionProfile =
+    sameUser && current
+      ? {
+          ...current.profile,
+          fullName: current.profile.fullName || fullName,
+          avatarUrl: current.profile.avatarUrl || avatarUrl,
+        }
+      : { ...emptyProfile(), fullName, avatarUrl }
+
+  const resolvedName =
+    (sameUser && current ? current.name : "") ||
+    fullName ||
+    defaultNameFor(role, email)
+
+  const next: SessionUser = {
+    name: resolvedName,
+    email,
+    role,
+    provider,
+    onboarded: sameUser && current ? current.onboarded : false,
+    profile,
+  }
+  persistSession(next)
+  return next
 }
 
 /** لوحة الفئة المناسبة، ومن لم يكمل بياناته يُوجَّه إلى `/onboarding`. */

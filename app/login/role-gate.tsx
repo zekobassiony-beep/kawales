@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { Check, Drama, Loader2, Lock, LogOut, Mail, ShieldCheck, Sparkles, X } from "lucide-react"
+import { Check, Drama, Loader2, Lock, LogOut, Mail, Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ONBOARDING_PATH, ROLE_LABELS, ROLE_META, ROLE_ORDER, type AccountRole } from "@/lib/roles"
 import { dashboardPathForUser, signIn, signOut, useSession } from "@/lib/session"
+import { SupabaseAuthPanel } from "@/app/login/supabase-auth-panel"
 
 /** صور معبّرة عن كل نوع حساب (جمهور/ممثل/فرقة/مسرح) — تُستخدم ككروت وخلفيات ديناميكية. */
 const ROLE_IMAGES: Record<AccountRole, string> = {
@@ -304,12 +305,6 @@ function AuthModal({ role, open, onClose }: { role: AccountRole; open: boolean; 
     goToOnboarding()
   }
 
-  const continueWithGoogle = () => {
-    setError("")
-    signIn({ email: "demo.google@kawalees.test", role, provider: "google", name: "حساب Google" })
-    goToOnboarding()
-  }
-
   return (
     <div
       role="dialog"
@@ -421,22 +416,15 @@ function AuthModal({ role, open, onClose }: { role: AccountRole; open: boolean; 
 
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
             <span className="h-px flex-1 bg-border/60" />
-            أو
+            الدخول الرسمي (Supabase Auth)
             <span className="h-px flex-1 bg-border/60" />
           </div>
 
-          <button
-            type="button"
-            onClick={continueWithGoogle}
-            disabled={pending}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-border/60 px-6 py-2.5 text-sm font-medium transition-colors hover:bg-secondary disabled:opacity-60"
-          >
-            <ShieldCheck className="h-4 w-4 text-primary" />
-            المتابعة بحساب Google (تجريبي)
-          </button>
+          <SupabaseAuthPanel role={role} accent={meta.accent} />
 
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-            بعد الدخول ننقلك لإكمال بياناتك ثم إلى لوحة فئتك. الجلسة تجريبية ومحفوظة في متصفحك فقط.
+            الدخول أعلاه جلسة حقيقية عبر Supabase (Google أو كود البريد). النموذج التجريبي بالأعلى يبقى متاحًا للعرض
+            فقط وبلا كلمة مرور حقيقية.
           </p>
         </form>
       </div>

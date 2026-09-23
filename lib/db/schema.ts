@@ -27,6 +27,8 @@ export const venues = pgTable("venues", {
   city: text("city").notNull(),
   address: text("address").notNull().default(""),
   imageUrl: text("image_url"),
+  /** رابط اللوكيشن المباشر من Google Maps (اختياري). */
+  googleMapsUrl: text("google_maps_url"),
   rows: integer("rows").notNull().default(8),
   seatsPerRow: integer("seats_per_row").notNull().default(12),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
