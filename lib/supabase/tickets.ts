@@ -120,6 +120,32 @@ export async function updateTicketStatusInDb(ticketId: string, status: TicketSta
   }
 }
 
+/** يُحدّث صورة الإيصال ورقم المحوّل ويعيد التذكرة إلى «قيد المراجعة». */
+export async function updateTicketReceiptInDb(
+  ticketId: string,
+  receiptUrl: string | null,
+  senderPhone: string | null,
+): Promise<Ticket | null> {
+  const admin = getSupabaseAdmin()
+  if (!admin) return null
+  try {
+    const { data, error } = await admin
+      .from(TICKETS_TABLE)
+      .update({ receipt_url: receiptUrl, sender_phone: senderPhone, status: "pending" })
+      .eq("id", ticketId)
+      .select()
+      .single()
+    if (error) {
+      console.warn(`[supabase] update receipt ${ticketId} failed: ${error.message}`)
+      return null
+    }
+    return data ? rowToTicket(data as TicketRow) : null
+  } catch (error) {
+    console.warn(`[supabase] update receipt ${ticketId} errored: ${describe(error)}`)
+    return null
+  }
+}
+
 /** يقرأ تذكرة واحدة من Supabase بالمعرّف، أو null عند غيابها/فشل القراءة. */
 export async function getTicketFromDb(ticketId: string): Promise<Ticket | null> {
   const admin = getSupabaseAdmin()

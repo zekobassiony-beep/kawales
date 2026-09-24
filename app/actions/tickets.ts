@@ -3,7 +3,7 @@
 import type { Ticket, TicketStatus } from "@/lib/tickets"
 import { checkAdminAccess, getSessionEmail } from "@/lib/auth"
 import { getSupabaseUser } from "@/lib/supabase/auth-server"
-import { listTicketsFromDb, updateTicketStatusInDb, upsertTicketInDb } from "@/lib/supabase/tickets"
+import { listTicketsFromDb, updateTicketReceiptInDb, updateTicketStatusInDb, upsertTicketInDb } from "@/lib/supabase/tickets"
 
 /**
  * إجراءات الخادم للتذاكر على Supabase — مصدر الحقيقة للوحات التحكم.
@@ -60,6 +60,38 @@ export async function listProducerTickets(): Promise<Ticket[]> {
   if (!(await requireSignedIn())) return []
   const rows = await listTicketsFromDb()
   return rows ?? []
+}
+
+/**
+ * قائمة تذاكر المستخدم المسجّل حاليًا (Supabase Auth أو الجلسة المحلية).
+ * تُستخدم في صفحة «حجوزاتي وتذاكري» للعميل.
+ */
+export async function getUserTickets(): Promise<Ticket[]> {
+  const cookieEmail = await getSessionEmail()
+  let email = cookieEmail
+  if (!email) {
+    const user = await getSupabaseUser()
+    email = (user?.email ?? "").trim().toLowerCase()
+  }
+  if (!email) return []
+  const rows = await listTicketsFromDb(email)
+  return rows ?? []
+}
+
+/** إعادة رفع إيصال تحويل لتذكرة مرفوضة (تُعاد إلى «قيد المراجعة»). */
+export async function reuploadTicketReceipt(input: {
+  ticketId: string
+  receiptUrl: string
+  senderPhone?: string
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!(await requireSignedIn())) return { ok: false, error: "سجّل الدخول أولًا لإعادة رفع الإيصال." }
+  if (!input.receiptUrl.trim()) return { ok: false, error: "أرفق صورة الإيصال أولاً." }
+  const updated = await updateTicketReceiptInDb(
+    input.ticketId.trim().toUpperCase(),
+    input.receiptUrl,
+    input.senderPhone?.trim() || null,
+  )
+  return updated ? { ok: true } : { ok: false, error: "تعذّر حفظ الإيصال — حاول مرة أخرى." }
 }
 
 /** تحديث حالة تذكرة من لوحة المخرج (اعتماد/رفض إيصال). */

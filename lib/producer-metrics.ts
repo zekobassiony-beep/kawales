@@ -22,6 +22,8 @@ export type ProducerEventInput = {
   startsAtIso: string
   venueName: string
   venueCity: string
+  /** سعة المسرح (صفوف × مقاعد) لحساب نسبة الإشغال. */
+  capacity: number
 }
 
 export type ProducerKpis = {
