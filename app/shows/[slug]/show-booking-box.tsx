@@ -1,46 +1,95 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
-import { Gift, Share2, ShoppingBag, Ticket } from "lucide-react"
+import { Armchair, Gift, Share2, ShoppingBag, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatPrice } from "@/lib/format"
-import { groupDiscount, occupancyInfo, type BookingTierLike } from "@/lib/show-detail"
+import { formatPrice, tierForRow } from "@/lib/format"
+import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
+import { calculateTotals } from "@/lib/pricing"
+import { groupDiscount, occupancyInfo } from "@/lib/show-detail"
+import type { EventWithRelations } from "@/lib/queries"
 import { QuantityRow, SIDEBAR_CARD, TierOption } from "@/app/shows/[slug]/show-booking-parts"
+import { NumberedSeats } from "@/components/checkout-steps"
+import { PaymentModal, type PaymentSelection } from "@/components/payment-modal"
 
 /**
- * صندوق حجز التذاكر المباشر (Sticky Sidebar) — Dark Graphite & Gold:
- * السعر المبدئي + شريط المتبقي + كروت الفئات المعدنية + عداد الكمية بحساب فوري
- * + زر «احجز دلوقتي» الذهبي + أزرار الهدية والمشاركة.
+ * صندوق الحجز الموحّد على صفحة العرض — يتكيف مع نوع العرض:
+ * - مقاعد تفاعلية (has_interactive_seats = true): خريطة كراسي تفاعلية ثم زر
+ *   «متابعة إلى الدفع» يفتح نافذة الدفع الموحّدة.
+ * - فئات عامة (false): كارت الفئة + العداد ثم زر «احجز دلوقتي» يفتح نافذة
+ *   الدفع الموحّدة مباشرة دون خريطة كراسي.
  */
 export function ShowBookingBox({
-  slug,
-  title,
-  tiers,
+  event,
   capacity,
   sold,
+  bookedSeatIds,
   blockedReason,
 }: {
-  slug: string
-  title: string
-  tiers: BookingTierLike[]
+  event: EventWithRelations
   capacity: number
   sold: number
+  bookedSeatIds: string[]
   blockedReason: string | null
 }) {
+  const tiers = event.priceTiers
+  const interactive = event.hasInteractiveSeats
+
   const occupancy = useMemo(() => occupancyInfo(sold, capacity), [sold, capacity])
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState(tiers[0]?.id ?? "")
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState<string | null>(null)
+  const [pay, setPay] = useState<PaymentSelection | null>(null)
 
-  const selected = tiers.find((tier) => tier.id === selectedId) ?? tiers[0]
-  const unitCents = selected?.priceCents ?? 0
+  const selectedTier = tiers.find((tier) => tier.id === selectedId) ?? tiers[0]
+  const unitCents = selectedTier?.priceCents ?? 0
   const deal = useMemo(() => groupDiscount(quantity, unitCents), [quantity, unitCents])
-
   const minPrice = Math.min(...tiers.map((tier) => tier.priceCents), 0)
   const soldOut = occupancy.remaining === 0
-  const canBook = !blockedReason && !soldOut && tiers.length > 0
-  const bookHref = `/shows/${slug}/book?tier=${encodeURIComponent(selected?.id ?? "")}&qty=${quantity}`
+  const blocked = Boolean(blockedReason)
+
+  const selection = useMemo<PaymentSelection | null>(() => {
+    if (interactive) {
+      if (selectedSeats.length === 0) return null
+      const items = selectedSeats.map((seatId) => {
+        const parsed = parseSeatId(seatId)
+        const tier = parsed ? tierForRow(tiers, parsed.rowIndex) : undefined
+        return { priceCents: tier?.priceCents ?? 0, tierName: tier?.name ?? "—" }
+      })
+      const totals = calculateTotals(items.map((item) => item.priceCents))
+      const names = [...new Set(items.map((item) => item.tierName))]
+      return {
+        seats: [...selectedSeats].sort(),
+        tierName: names.join(" + ") || "—",
+        totalCents: totals.totalCents,
+        quantity: items.length,
+      }
+    }
+    if (!selectedTier) return null
+    const totals = calculateTotals(Array.from({ length: quantity }, () => selectedTier.priceCents))
+    return {
+      seats: [`${quantity} × ${selectedTier.name}`],
+      tierName: selectedTier.name,
+      totalCents: totals.totalCents,
+      quantity,
+    }
+  }, [interactive, selectedSeats, tiers, selectedTier, quantity])
+
+  const toggleSeat = (seatId: string) => {
+    setNotice(null)
+    if (selectedSeats.includes(seatId)) {
+      setSelectedSeats(selectedSeats.filter((id) => id !== seatId))
+      return
+    }
+    if (selectedSeats.length >= MAX_SEATS_PER_BOOKING) {
+      setNotice(`يمكنك اختيار حتى ${MAX_SEATS_PER_BOOKING} مقاعد لكل حجز.`)
+      return
+    }
+    setSelectedSeats([...selectedSeats, seatId])
+  }
+
+  const canProceed = !blocked && !soldOut && tiers.length > 0 && selection !== null
 
   return (
     <div className={cn(SIDEBAR_CARD, "overflow-hidden")}>
@@ -65,49 +114,70 @@ export function ShowBookingBox({
       </div>
 
       <div className="space-y-4 p-5">
-        <div className="space-y-2">
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
-            <Ticket className="h-3.5 w-3.5 text-amber-400" />
-            فئات التذاكر
-          </p>
-          <div className="space-y-2">
-            {tiers.map((tier, index) => (
-              <TierOption
-                key={tier.id}
-                tier={tier}
-                index={index}
-                active={tier.id === selected?.id}
-                remaining={Math.max(0, Math.round(occupancy.remaining / Math.max(1, tiers.length)))}
-                onSelect={() => {
-                  setSelectedId(tier.id)
-                  setQuantity(1)
-                  setNotice(null)
-                }}
-              />
-            ))}
-          </div>
-        </div>
+        {interactive ? (
+          <>
+            <NumberedSeats event={event} selected={selectedSeats} onToggle={toggleSeat} bookedSeatIds={bookedSeatIds} />
+            {selection ? (
+              <p className="text-sm text-zinc-300">
+                المختار: <span className="font-bold text-zinc-100">{selection.quantity}</span> · الإجمالي:{" "}
+                <span className="font-serif font-bold text-amber-400">{formatPrice(selection.totalCents)}</span>{" "}
+                <span className="text-xs text-zinc-500">(شامل رسوم الخدمة)</span>
+              </p>
+            ) : (
+              <p className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Armchair className="h-3.5 w-3.5 text-amber-400" />
+                اختر مقاعدك من الخريطة للمتابعة.
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
+                <Ticket className="h-3.5 w-3.5 text-amber-400" />
+                فئات التذاكر
+              </p>
+              <div className="space-y-2">
+                {tiers.map((tier, index) => (
+                  <TierOption
+                    key={tier.id}
+                    tier={tier}
+                    index={index}
+                    active={tier.id === selectedTier?.id}
+                    remaining={Math.max(0, Math.round(occupancy.remaining / Math.max(1, tiers.length)))}
+                    onSelect={() => {
+                      setSelectedId(tier.id)
+                      setQuantity(1)
+                      setNotice(null)
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
 
-        {selected && !soldOut && (
-          <QuantityRow
-            quantity={quantity}
-            maxQuantity={Math.min(8, Math.max(1, occupancy.remaining))}
-            unitCents={unitCents}
-            totalCents={deal.totalCents}
-            discountPct={deal.pct}
-            savingsCents={deal.savingsCents}
-            onChange={setQuantity}
-          />
+            {selectedTier && !soldOut && (
+              <QuantityRow
+                quantity={quantity}
+                maxQuantity={Math.min(8, Math.max(1, occupancy.remaining))}
+                unitCents={unitCents}
+                totalCents={deal.totalCents}
+                discountPct={deal.pct}
+                savingsCents={deal.savingsCents}
+                onChange={setQuantity}
+              />
+            )}
+          </>
         )}
 
-        {canBook ? (
-          <Link
-            href={bookHref}
+        {canProceed ? (
+          <button
+            type="button"
+            onClick={() => selection && setPay(selection)}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-sm font-bold text-zinc-950 transition-colors hover:bg-amber-400"
           >
             <ShoppingBag className="h-4 w-4" />
-            احجز دلوقتي
-          </Link>
+            {interactive ? "متابعة إلى الدفع" : "احجز دلوقتي"}
+          </button>
         ) : (
           <p className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-center text-xs text-zinc-400">
             {soldOut ? "نفدت تذاكر هذا العرض — سجّل في قائمة الانتظار." : blockedReason ?? "الحجز غير متاح حاليًا."}
@@ -117,7 +187,7 @@ export function ShowBookingBox({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setNotice(`سيتم إرسال رابط هدية لعرض «${title}» إلى البريد الذي تختاره.`)}
+            onClick={() => setNotice(`سيتم إرسال رابط هدية لعرض «${event.title}» إلى البريد الذي تختاره.`)}
             className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-800 px-3 py-2.5 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60"
           >
             <Gift className="h-3.5 w-3.5" />
@@ -126,9 +196,9 @@ export function ShowBookingBox({
           <button
             type="button"
             onClick={() => {
-              const url = `${window.location.origin}/shows/${slug}`
+              const url = `${window.location.origin}/shows/${event.slug}`
               if (typeof navigator !== "undefined" && navigator.share) {
-                void navigator.share({ title, url }).catch(() => undefined)
+                void navigator.share({ title: event.title, url }).catch(() => undefined)
                 return
               }
               void navigator.clipboard.writeText(url).catch(() => undefined)
@@ -147,6 +217,8 @@ export function ShowBookingBox({
           </p>
         )}
       </div>
+
+      {pay && <PaymentModal event={event} selection={pay} open onClose={() => setPay(null)} />}
     </div>
   )
 }

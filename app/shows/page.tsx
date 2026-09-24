@@ -60,7 +60,7 @@ export default async function ShowsPage({
           عروض تنشرها الفرق مباشرة من لوحاتها — تظهر هنا فور إنشائها وتُكمل تفاصيلها لاحقًا.
         </p>
         <div className="mt-6">
-          <LiveShowsGrid />
+          <LiveShowsGrid events={events} />
         </div>
       </section>
     </div>

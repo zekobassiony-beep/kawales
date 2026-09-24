@@ -1,11 +1,10 @@
 import Image from "next/image"
 import { notFound } from "next/navigation"
 import { CalendarDays, Languages, MapPin, Star, Users } from "lucide-react"
-import { getEventBySlug, getEvents, getSoldSeatCounts } from "@/lib/queries"
+import { getEventBySlug, getEvents, getSoldSeatCounts, getBookedSeatIds } from "@/lib/queries"
 import { formatDate, formatDuration, formatTime } from "@/lib/format"
 import { bookingBlockedReason } from "@/lib/booking-rules"
-import { cn } from "@/lib/utils"
-import { ageRatingFor, buildShowtimeCards, mapsUrlFor, occupancyInfo } from "@/lib/show-detail"
+import { ageRatingFor, buildShowtimeCards, mapsUrlFor } from "@/lib/show-detail"
 import { ShowTabs, ShowCastPanel } from "@/app/shows/[slug]/show-tabs"
 import { ShowRatingStats, ShowReviewsPanel } from "@/app/shows/[slug]/show-reviews-panel"
 import { ShowTrailerButton } from "@/app/shows/[slug]/show-trailer-button"
@@ -36,8 +35,8 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
 
   const capacity = Math.max(1, event.venue.rows * event.venue.seatsPerRow)
   const sold = soldCounts.get(event.id) ?? 0
+  const bookedSeatIds = await getBookedSeatIds(event.id)
   const minPrice = Math.min(...event.priceTiers.map((tier) => tier.priceCents), 0)
-  const occupancy = occupancyInfo(sold, capacity)
   const blocked = bookingBlockedReason(event)
   const ageRating = ageRatingFor({ category: event.category, durationMinutes: event.durationMinutes })
   const mapsUrl = mapsUrlFor(event.venue)
@@ -132,28 +131,11 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
 
           {/* صندوق الحجز + خريطة المسرح (Sticky على الشاشات الكبيرة) */}
           <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-            {/* خريطة المقاعد التفاعلية */}
-            <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur">
-              <div className="flex items-center justify-between gap-2 p-5 pb-2">
-                <h2 className="flex items-center gap-2 font-serif text-lg font-semibold text-zinc-100">
-                  <MapPin className="h-4 w-4 text-amber-400" />
-                  خريطة المسرح
-                </h2>
-                <span className={occupancy.remaining === 0 ? "text-[11px] text-red-400" : "text-[11px] text-amber-300"}>
-                  {occupancy.remaining} مقعد متبقٍ
-                </span>
-              </div>
-              <div className="overflow-x-auto p-4 pt-2">
-                <SeatPreview rows={event.venue.rows} seatsPerRow={event.venue.seatsPerRow} sold={sold} />
-              </div>
-            </div>
-
             <ShowBookingBox
-              slug={event.slug}
-              title={event.title}
-              tiers={event.priceTiers}
+              event={event}
               capacity={capacity}
               sold={sold}
+              bookedSeatIds={bookedSeatIds}
               blockedReason={blocked}
             />
             <ShowSidebarExtras organizer={organizer} initialWaitlist={12} />
@@ -163,43 +145,6 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
     </div>
   )
 }
-
-/** معاينة مبسطة لتخطيط الكراسي مع إظهار المباع/المتبقي تقريبيًا. */
-function SeatPreview({ rows, seatsPerRow, sold }: { rows: number; seatsPerRow: number; sold: number }) {
-  const total = Math.max(1, rows * seatsPerRow)
-  const soldRatio = Math.min(1, sold / total)
-  return (
-    <div className="min-w-[520px] space-y-1.5" dir="ltr">
-      <p className="mb-2 rounded-lg bg-amber-500/15 py-1 text-center text-[10px] font-semibold text-amber-300">المسرح / Stage</p>
-      {Array.from({ length: rows }, (_, rowIndex) => (
-        <div key={rowIndex} className="flex items-center justify-center gap-1">
-          {Array.from({ length: seatsPerRow }, (_, seatIndex) => {
-            const position = (rowIndex * seatsPerRow + seatIndex) / total
-            const taken = position < soldRatio
-            return (
-              <span
-                key={seatIndex}
-                className={cn(
-                  "h-4 w-4 rounded-[4px] border",
-                  taken ? "border-red-500/50 bg-red-500/40" : "border-zinc-700 bg-zinc-800/70",
-                )}
-              />
-            )
-          })}
-        </div>
-      ))}
-      <div className="mt-3 flex justify-center gap-4 text-[10px] text-zinc-500">
-        <span className="flex items-center gap-1">
-          <span className="h-3 w-3 rounded-[4px] border border-zinc-700 bg-zinc-800/70" /> متاح
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-3 w-3 rounded-[4px] border border-red-500/50 bg-red-500/40" /> مباع
-        </span>
-      </div>
-    </div>
-  )
-}
-
 
 function InfoCard({ icon: Icon, label, value }: { icon: typeof MapPin; label: string; value: string }) {
   return (

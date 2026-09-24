@@ -22,6 +22,8 @@ export type EventWithRelations = {
   trailerUrl: string | null
   /** هل يدعم العرض خصم الشلة؟ */
   hasGroupDiscount: boolean
+  /** هل للعرض مقاعد تفاعلية مرقّمة (true) أم فئات تذاكر عامة فقط (false)؟ */
+  hasInteractiveSeats: boolean
   priceTiers: { id: string; name: string; priceCents: number; color: string; rows: number[] }[]
   troupe: { id: number; name: string; slug: string; bio: string; city: string | null }
   venue: {
@@ -78,6 +80,7 @@ const mockEvents: EventWithRelations[] = [
     status: "on_sale",
     trailerUrl: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
     hasGroupDiscount: true,
+    hasInteractiveSeats: true,
     priceTiers: [
       { id: "orchestra", name: "أوركسترا", priceCents: 25000, color: "#c9a227", rows: [0, 1, 2, 3] },
       { id: "balcony", name: "بلكونة", priceCents: 15000, color: "#6b7280", rows: [4, 5, 6, 7] },
@@ -117,6 +120,7 @@ const mockEvents: EventWithRelations[] = [
     status: "on_sale",
     trailerUrl: null,
     hasGroupDiscount: false,
+    hasInteractiveSeats: false,
     priceTiers: [
       { id: "stalls", name: "بارتر", priceCents: 30000, color: "#c9a227", rows: [0, 1, 2, 3] },
       { id: "circle", name: "صف أول بلكونة", priceCents: 18000, color: "#6b7280", rows: [4, 5, 6, 7] },
@@ -158,6 +162,7 @@ function mapRow(row: any): EventWithRelations {
     status: row.event.status,
     trailerUrl: row.event.trailerUrl ?? null,
     hasGroupDiscount: row.event.hasGroupDiscount ?? false,
+    hasInteractiveSeats: row.event.hasInteractiveSeats ?? false,
     priceTiers: row.event.priceTiers ?? [],
     troupe: {
       id: row.troupe.id,

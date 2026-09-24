@@ -67,7 +67,7 @@ export default async function HomePage() {
           </div>
         </div>
         <div className="mt-8">
-          <LiveShowsGrid />
+          <LiveShowsGrid events={events} />
         </div>
       </section>
 

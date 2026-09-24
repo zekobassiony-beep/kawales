@@ -10,7 +10,7 @@ create table if not exists public.tickets (
   show_id      text not null default '',             -- معرّف العرض
   user_id      text,                                 -- بريد العميل (CustomerID في المنصة)
   sender_phone text,                                 -- رقم الموبايل المحوَّل منه
-  receipt_url  text,                                 -- رابط/Base64 لصورة الإيصال
+  receipt_url  text,                                 -- رابط عام لصورة الإيصال (Supabase Storage)
   status       text not null default 'pending',      -- pending | approved | rejected | checked_in
   total_price  integer not null default 0,           -- الإجمالي بالقروش (piastres)
   seats        jsonb not null default '[]'::jsonb,   -- مصفوفة المقاعد

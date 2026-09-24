@@ -1,11 +1,11 @@
 "use client"
 
-import { CalendarPlus, Download, Printer, QrCode as QrCodeIcon } from "lucide-react"
+import { CalendarPlus, Download, Printer, QrCode as QrCodeIcon, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { googleCalendarUrl } from "@/lib/calendar"
 import { QR_QUIET_ZONE, qrMatrix } from "@/lib/qr"
 import { downloadQrPng } from "@/lib/qr-image"
-import { paymentMethodLabel, type Ticket } from "@/lib/tickets"
+import { paymentMethodLabel, telegramTicketLink, type Ticket } from "@/lib/tickets"
 
 /**
  * أدوات تذكرة الجمهور: إضافة إلى تقويم جوجل، حفظ التذكرة كصورة، وطباعة/PDF —
@@ -62,6 +62,16 @@ export function TicketUtilityButtons({ ticket, className }: { ticket: Ticket; cl
         <Printer className="h-3.5 w-3.5" />
         طباعة / حفظ PDF
       </button>
+      {/* ربط العميل ببوت كواليس على تليجرام مع إرفاق كود التذكرة (نفس الآلية في كلا مساري الحجز). */}
+      <a
+        href={telegramTicketLink(ticket.id)}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-2 rounded-full border border-sky-500/50 bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-500/20"
+      >
+        <Send className="h-3.5 w-3.5" />
+        ربط تليجرام ومتابعة التذكرة ✈️
+      </a>
     </div>
   )
 }

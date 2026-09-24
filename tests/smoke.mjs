@@ -105,7 +105,7 @@ try {
     }
   }
 
-  // 3. Walk every show detail page: find one on sale and one already closed
+  // 3. Walk every show detail page: find one bookable and one already closed
   let bookableSlug = null
   let closedSlug = null
   for (const slug of slugs) {
@@ -114,35 +114,33 @@ try {
       fail(`GET /shows/${slug} returned ${detail.status}`)
       continue
     }
-    if (detail.body.includes(`href="/shows/${slug}/seats"`)) bookableSlug ??= slug
+    const body = readable(detail.body)
+    if (body.includes("احجز دلوقتي") || body.includes("متابعة إلى الدفع")) bookableSlug ??= slug
     else closedSlug ??= slug
   }
 
-  if (bookableSlug) pass(`GET /shows/${bookableSlug} renders a detail page with a seat CTA`)
+  if (bookableSlug) pass(`GET /shows/${bookableSlug} renders a detail page with a booking CTA`)
   else fail("no show on sale was found in the catalog")
 
   if (closedSlug) {
-    const closed = await get(`/shows/${closedSlug}/seats`)
-  if (closed.status === 200 && closed.body.includes("اختيار المقاعد مغلق")) {
-      pass(`GET /shows/${closedSlug}/seats explains that booking is closed`)
+    const closed = await get(`/shows/${closedSlug}`)
+    const closedBody = readable(closed.body)
+    if (closed.status === 200 && !closedBody.includes("احجز دلوقتي") && !closedBody.includes("متابعة إلى الدفع")) {
+      pass(`GET /shows/${closedSlug} hides the booking CTA while booking is closed`)
     } else {
-      fail(`GET /shows/${closedSlug}/seats did not show the closed-for-booking notice`)
+      fail(`GET /shows/${closedSlug} still shows a booking CTA while booking is closed`)
     }
   }
 
-  // 4. Interactive seat map + seat buttons for a bookable show
+  // 4. The retired multi-step paths redirect to the unified show detail page
   if (bookableSlug) {
-    const seats = await get(`/shows/${bookableSlug}/seats`)
-    if (seats.status !== 200) {
-      fail(`GET /shows/${bookableSlug}/seats returned ${seats.status}`)
-    } else if (!seats.body.includes("اختر مقاعدك")) {
-      fail(`/shows/${bookableSlug}/seats did not contain the seat-selection heading`)
-    } else if (!seats.body.includes('aria-label="المقعد A1')) {
-      fail(`/shows/${bookableSlug}/seats rendered no seat buttons`)
-    } else if (!seats.body.includes("تأكيد الحجز")) {
-      fail(`/shows/${bookableSlug}/seats is missing the checkout form`)
-    } else {
-      pass(`GET /shows/${bookableSlug}/seats renders the interactive seat map`)
+    for (const retired of ["seats", "book"]) {
+      const response = await get(`/shows/${bookableSlug}/${retired}`)
+      if (response.status >= 300 && response.status < 400) {
+        pass(`GET /shows/${bookableSlug}/${retired} redirects to the unified booking page`)
+      } else {
+        fail(`GET /shows/${bookableSlug}/${retired} did not redirect (returned ${response.status})`)
+      }
     }
   }
 

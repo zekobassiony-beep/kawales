@@ -41,12 +41,16 @@ export function NumberedSeats({
   event,
   selected,
   onToggle,
+  bookedSeatIds = [],
 }: {
   event: EventWithRelations
   selected: string[]
   onToggle: (seatId: string) => void
+  /** مقاعد محجوزة مسبقًا (تُعرض كـ «مباع» وغير قابلة للاختيار). */
+  bookedSeatIds?: string[]
 }) {
   const tiers = event.priceTiers
+  const booked = new Set(bookedSeatIds)
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -85,6 +89,21 @@ export function NumberedSeats({
                   {Array.from({ length: event.venue.seatsPerRow }, (_, seatIndex) => {
                     const seatId = `${rowLabel(rowIndex)}${seatIndex + 1}`
                     const isSelected = selected.includes(seatId)
+                    const isBooked = booked.has(seatId)
+                    if (isBooked) {
+                      return (
+                        <button
+                          key={seatId}
+                          type="button"
+                          disabled
+                          title={`${seatId} · مباع`}
+                          aria-label={`المقعد ${seatId} — مباع`}
+                          className="flex h-6 w-6 shrink-0 cursor-not-allowed items-center justify-center rounded-md border border-red-500/40 bg-red-500/30 text-[9px] font-semibold text-red-200/70 line-through"
+                        >
+                          {seatIndex + 1}
+                        </button>
+                      )
+                    }
                     return (
                       <button
                         key={seatId}

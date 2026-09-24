@@ -61,6 +61,8 @@ export const events = pgTable("events", {
   status: text("status").notNull().default("on_sale"),
   /** هل يدعم هذا العرض خصم الشلة (Group Discount)؟ يُفعّل كارت الخصم في صفحة العرض. */
   hasGroupDiscount: boolean("has_group_discount").notNull().default(false),
+  /** هل للعرض مقاعد تفاعلية مرقّمة (true) أم فئات تذاكر عامة فقط (false)؟ */
+  hasInteractiveSeats: boolean("has_interactive_seats").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

@@ -4,6 +4,7 @@ import type { Ticket, TicketStatus } from "@/lib/tickets"
 import { checkAdminAccess, getSessionEmail } from "@/lib/auth"
 import { getSupabaseUser } from "@/lib/supabase/auth-server"
 import { listTicketsFromDb, updateTicketReceiptInDb, updateTicketStatusInDb, upsertTicketInDb } from "@/lib/supabase/tickets"
+import { resolveReceiptPublicUrl } from "@/lib/supabase/storage"
 
 /**
  * إجراءات الخادم للتذاكر على Supabase — مصدر الحقيقة للوحات التحكم.
@@ -15,7 +16,9 @@ import { listTicketsFromDb, updateTicketReceiptInDb, updateTicketStatusInDb, ups
 
 export async function persistTicket(ticket: Ticket): Promise<{ ok: boolean }> {
   try {
-    const saved = await upsertTicketInDb(ticket)
+    // رفع صورة الإيصال إلى Supabase Storage وحفظ رابطها العام في `receipt_url`.
+    const receiptImage = await resolveReceiptPublicUrl(ticket.receiptImage, ticket.id)
+    const saved = await upsertTicketInDb({ ...ticket, receiptImage })
     return { ok: saved !== null }
   } catch (error) {
     console.error(`[tickets] persistTicket ${ticket.id} failed: ${error instanceof Error ? error.message : error}`)
@@ -86,9 +89,11 @@ export async function reuploadTicketReceipt(input: {
 }): Promise<{ ok: boolean; error?: string }> {
   if (!(await requireSignedIn())) return { ok: false, error: "سجّل الدخول أولًا لإعادة رفع الإيصال." }
   if (!input.receiptUrl.trim()) return { ok: false, error: "أرفق صورة الإيصال أولاً." }
+  const ticketId = input.ticketId.trim().toUpperCase()
+  const receiptUrl = await resolveReceiptPublicUrl(input.receiptUrl, ticketId)
   const updated = await updateTicketReceiptInDb(
-    input.ticketId.trim().toUpperCase(),
-    input.receiptUrl,
+    ticketId,
+    receiptUrl ?? null,
     input.senderPhone?.trim() || null,
   )
   return updated ? { ok: true } : { ok: false, error: "تعذّر حفظ الإيصال — حاول مرة أخرى." }
