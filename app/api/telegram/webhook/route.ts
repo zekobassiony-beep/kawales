@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server"
 import {
+  getTelegramChatId,
+  linkTelegramChat,
   rejectTicketOnServer,
   verifyTicketOnServer,
   type TicketDecisionResult,
@@ -101,6 +103,25 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as TelegramUpdate | null
     const callback = body?.callback_query
 
+    // رسالة عادية (وليست ضغط زر): قد تكون `/start KW-XXXXXX` لربط شات العميل.
+    const message = (body as { message?: { text?: string; chat?: { id: number } } } | null)?.message
+    if (message?.text && message.chat?.id) {
+      const startMatch = /^\/(start|start\s+)/i.exec(message.text.trim())
+      if (startMatch) {
+        const ticketId = message.text.replace(/^\/(start|start\s+)/i, "").trim().toUpperCase()
+        if (ticketId) {
+          linkTelegramChat(ticketId, message.chat.id)
+          if (token) {
+            await callTelegram(token, "sendMessage", {
+              chat_id: message.chat.id,
+              text: `🎭 أهلًا بك في بوت كواليس!\nربطنا محادثتك بالتذكرة ${ticketId} — فور اعتماد إيصالك ستصلك بطاقة التذكرة ورمز QR هنا.`,
+            })
+          }
+        }
+      }
+      return okResponse()
+    }
+
     // لا يوجد ضغط زر (تحديث آخر) — استجابة 200 فورية.
     if (!callback) return okResponse()
 
@@ -155,6 +176,15 @@ export async function POST(req: NextRequest) {
           }
           if (approved && !decision.alreadyDecided) {
             await sendTicketQrImage({ qrPayload: decision.record.qrPayload, chatId, caption: qrCaption(decision) })
+            // إن كان العميل قد بدأ محادثة مع البوت (/start): نرسل له بطاقة التذكرة + QR في شاته.
+            const customerChatId = getTelegramChatId(ticketId)
+            if (customerChatId) {
+              await sendTicketQrImage({
+                qrPayload: decision.record.qrPayload,
+                chatId: customerChatId,
+                caption: `🎟️ <b>تم اعتماد تذكرتك ${ticketId} ✅</b>\nهذا رمز الدخول — اعرضه عند بوابة المسرح.`,
+              })
+            }
           }
         })
       } catch (error) {

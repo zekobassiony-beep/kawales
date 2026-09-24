@@ -1,6 +1,6 @@
 import Image from "next/image"
 import { notFound } from "next/navigation"
-import { CalendarDays, Languages, MapPin, Play, Star, Users } from "lucide-react"
+import { CalendarDays, Languages, MapPin, Star, Users } from "lucide-react"
 import { getEventBySlug, getEvents, getSoldSeatCounts } from "@/lib/queries"
 import { formatDate, formatDuration, formatTime } from "@/lib/format"
 import { bookingBlockedReason } from "@/lib/booking-rules"
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { ageRatingFor, buildShowtimeCards, mapsUrlFor, occupancyInfo } from "@/lib/show-detail"
 import { ShowTabs, ShowCastPanel } from "@/app/shows/[slug]/show-tabs"
 import { ShowRatingStats, ShowReviewsPanel } from "@/app/shows/[slug]/show-reviews-panel"
+import { ShowTrailerButton } from "@/app/shows/[slug]/show-trailer-button"
 import { ShowDetailsPanel } from "@/app/shows/[slug]/show-details-panel"
 import { ShowBookingBox } from "@/app/shows/[slug]/show-booking-box"
 import { ShowSidebarExtras } from "@/app/shows/[slug]/show-booking-parts"
@@ -71,13 +72,7 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-background/40" />
 
-        <button
-          type="button"
-          aria-label="تشغيل التريلر"
-          className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-amber-500/50 bg-zinc-950/70 text-amber-400 shadow-[0_0_40px_-10px_rgba(245,158,11,0.95)] backdrop-blur transition-transform hover:scale-105"
-        >
-          <Play className="h-6 w-6" />
-        </button>
+        <ShowTrailerButton title={event.title} posterUrl={event.posterUrl ?? "/placeholder.svg"} trailerUrl={event.trailerUrl} />
 
         <div className="relative mx-auto max-w-6xl px-4 pb-8 pt-24 sm:px-6">
           <p className="text-sm font-medium uppercase tracking-[0.2em] text-amber-400">{event.troupe.name}</p>
@@ -127,43 +122,32 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
                   venue={event.venue}
                   mapsUrl={mapsUrl}
                   minPriceCents={minPrice}
+                  groupDiscountEnabled={event.hasGroupDiscount}
                 />
               }
               cast={<ShowCastPanel seed={event.title} />}
               reviews={<ShowReviewsPanel showId={String(event.id)} showTitle={event.title} />}
             />
-
-            {/* خريطة المسرح (معاينة الإشغال) */}
-            <section className={cn(CARD, "p-6")}>
-              <h2 className="flex items-center gap-2 font-serif text-xl font-semibold text-zinc-100">
-                <MapPin className="h-5 w-5 text-amber-400" />
-                خريطة المسرح
-              </h2>
-              <p className="mt-2 text-xs text-zinc-500">
-                {event.venue.name} — {event.venue.rows} صفوف × {event.venue.seatsPerRow} مقعد ·{" "}
-                <span className={occupancy.remaining === 0 ? "text-red-400" : "text-amber-300"}>
-                  {occupancy.remaining} مقعد متبقٍ
-                </span>
-              </p>
-              <div className="mt-4 overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-                <SeatPreview rows={event.venue.rows} seatsPerRow={event.venue.seatsPerRow} sold={sold} />
-              </div>
-            </section>
-
-            {/* التقييمات العامة (تحت الخريطة) */}
-            <section className={cn(CARD, "p-6")}>
-              <h2 className="font-serif text-xl font-semibold text-zinc-100">تقييمات الجمهور</h2>
-              <p className="mt-2 text-xs text-zinc-500">
-                كل تقييم هنا موثق بتذكرة سُجّل حضورها عند البوابة — بلا تقييمات وهمية.
-              </p>
-              <div className="mt-4">
-                <ShowReviewsPanel showId={String(event.id)} showTitle={event.title} />
-              </div>
-            </section>
           </div>
 
-          {/* صندوق الحجز (Sticky على الشاشات الكبيرة) */}
-          <aside className="lg:sticky lg:top-24 lg:self-start">
+          {/* صندوق الحجز + خريطة المسرح (Sticky على الشاشات الكبيرة) */}
+          <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+            {/* خريطة المقاعد التفاعلية */}
+            <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur">
+              <div className="flex items-center justify-between gap-2 p-5 pb-2">
+                <h2 className="flex items-center gap-2 font-serif text-lg font-semibold text-zinc-100">
+                  <MapPin className="h-4 w-4 text-amber-400" />
+                  خريطة المسرح
+                </h2>
+                <span className={occupancy.remaining === 0 ? "text-[11px] text-red-400" : "text-[11px] text-amber-300"}>
+                  {occupancy.remaining} مقعد متبقٍ
+                </span>
+              </div>
+              <div className="overflow-x-auto p-4 pt-2">
+                <SeatPreview rows={event.venue.rows} seatsPerRow={event.venue.seatsPerRow} sold={sold} />
+              </div>
+            </div>
+
             <ShowBookingBox
               slug={event.slug}
               title={event.title}

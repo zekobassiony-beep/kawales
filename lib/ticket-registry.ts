@@ -158,6 +158,20 @@ export async function getTicketRecord(id: string): Promise<ServerTicketRecord | 
   return fallback.get(ticketId)
 }
 
+/* ---------- ربط شات تليجرام العميل بالتذكرة (لإرسال QR عند القبول) ---------- */
+
+const telegramChats = new Map<string, number>()
+
+/** يربط chat_id بتذكرة (عندما يُرسل العميل `/start KW-XXXXXX` للبوت). */
+export function linkTelegramChat(id: string, chatId: number): void {
+  telegramChats.set(normalize(id), chatId)
+}
+
+/** يعيد chat_id المربوط بالتذكرة (لإرسال رمز QR للعميل في التليجرام). */
+export function getTelegramChatId(id: string): number | undefined {
+  return telegramChats.get(normalize(id))
+}
+
 /**
  * يطبّق قرار الإدارة (قبول/رفض) مباشرة على جدول `tickets` في Supabase:
  * - إن وُجدت التذكرة: تُحدَّث حالتها فورًا.

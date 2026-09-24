@@ -18,6 +18,10 @@ export type EventWithRelations = {
   startsAt: Date
   featured: boolean
   status: string
+  /** رابط برومو/تريلر الفيديو (اختياري). */
+  trailerUrl: string | null
+  /** هل يدعم العرض خصم الشلة؟ */
+  hasGroupDiscount: boolean
   priceTiers: { id: string; name: string; priceCents: number; color: string; rows: number[] }[]
   troupe: { id: number; name: string; slug: string; bio: string; city: string | null }
   venue: {
@@ -72,6 +76,8 @@ const mockEvents: EventWithRelations[] = [
     startsAt: new Date("2026-10-12T19:00:00+02:00"),
     featured: true,
     status: "on_sale",
+    trailerUrl: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    hasGroupDiscount: true,
     priceTiers: [
       { id: "orchestra", name: "أوركسترا", priceCents: 25000, color: "#c9a227", rows: [0, 1, 2, 3] },
       { id: "balcony", name: "بلكونة", priceCents: 15000, color: "#6b7280", rows: [4, 5, 6, 7] },
@@ -109,6 +115,8 @@ const mockEvents: EventWithRelations[] = [
     startsAt: new Date("2026-11-02T20:00:00+02:00"),
     featured: true,
     status: "on_sale",
+    trailerUrl: null,
+    hasGroupDiscount: false,
     priceTiers: [
       { id: "stalls", name: "بارتر", priceCents: 30000, color: "#c9a227", rows: [0, 1, 2, 3] },
       { id: "circle", name: "صف أول بلكونة", priceCents: 18000, color: "#6b7280", rows: [4, 5, 6, 7] },
@@ -148,6 +156,8 @@ function mapRow(row: any): EventWithRelations {
     startsAt: row.event.startsAt,
     featured: row.event.featured,
     status: row.event.status,
+    trailerUrl: row.event.trailerUrl ?? null,
+    hasGroupDiscount: row.event.hasGroupDiscount ?? false,
     priceTiers: row.event.priceTiers ?? [],
     troupe: {
       id: row.troupe.id,

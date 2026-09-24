@@ -113,7 +113,7 @@ export function ShowCard({
             </span>
           ) : (
             <Link
-              href={`/shows/${event.slug}/book`}
+              href={`/shows/${event.slug}`}
               className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-1.5 text-[11px] font-bold text-zinc-950 transition-colors hover:bg-amber-400"
             >
               <Ticket className="h-3.5 w-3.5" />

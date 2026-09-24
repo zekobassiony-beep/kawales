@@ -16,6 +16,7 @@ export function ShowDetailsPanel({
   venue,
   mapsUrl,
   minPriceCents,
+  groupDiscountEnabled = false,
 }: {
   description: string
   troupeName: string
@@ -24,6 +25,7 @@ export function ShowDetailsPanel({
   venue: { name: string; address: string; city: string }
   mapsUrl: string
   minPriceCents: number
+  groupDiscountEnabled?: boolean
 }) {
   return (
     <div className="space-y-6">
@@ -94,25 +96,27 @@ export function ShowDetailsPanel({
         </div>
       </section>
 
-      <section className={cn(CARD, "flex flex-wrap items-center justify-between gap-4 border-emerald-500/30 p-6")}>
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-            <Sparkles className="h-5 w-5" />
-          </span>
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
-              <Users className="h-3.5 w-3.5" />
-              تذكرة الشلة — خصم 15%
-            </p>
-            <p className="mt-1 text-xs text-zinc-400">
-              عند حجز 5 تذاكر أو أكثر في نفس الطلب. تبدأ التذاكر من {formatPrice(minPriceCents)}.
-            </p>
+      {groupDiscountEnabled && (
+        <section className={cn(CARD, "flex flex-wrap items-center justify-between gap-4 border-emerald-500/30 p-6")}>
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+                <Users className="h-3.5 w-3.5" />
+                تذكرة الشلة — خصم 15%
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">
+                عند حجز 5 تذاكر أو أكثر في نفس الطلب. تبدأ التذاكر من {formatPrice(minPriceCents)}.
+              </p>
+            </div>
           </div>
-        </div>
-        <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300">
-          يظهر الخصم تلقائيًا في صندوق الحجز
-        </p>
-      </section>
+          <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300">
+            يظهر الخصم تلقائيًا في صندوق الحجز
+          </p>
+        </section>
+      )}
 
       <p className="text-[11px] text-zinc-500">مدة العرض محسوبة على موعد {formatTime(new Date())} بتوقيت القاهرة.</p>
     </div>

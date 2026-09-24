@@ -59,6 +59,8 @@ export const events = pgTable("events", {
   priceTiers: jsonb("price_tiers").$type<PriceTier[]>().notNull().default([]),
   featured: boolean("featured").notNull().default(false),
   status: text("status").notNull().default("on_sale"),
+  /** هل يدعم هذا العرض خصم الشلة (Group Discount)؟ يُفعّل كارت الخصم في صفحة العرض. */
+  hasGroupDiscount: boolean("has_group_discount").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
