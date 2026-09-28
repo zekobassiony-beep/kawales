@@ -12,7 +12,10 @@
     "test:db": "node tests/probe-db.mjs",
     "test:integration": "node tests/booking-flow.mjs",
     "test:all": "npm run typecheck && npm test && npm run test:e2e && npm run test:integration",
+    "telegram:bridge": "node scripts/telegram-bridge.mjs",
+    "telegram:info": "node tests/telegram-webhook.mjs --info",
     "db:cleanup-seats": "node scripts/cleanup-orphan-seats.mjs",
+    "db:diagnose-tickets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/register-hooks.mjs scripts/diagnose-tickets.mjs",
     "egypt:seed": "node scripts/egypt-seed.mjs"
   },
   "dependencies": {

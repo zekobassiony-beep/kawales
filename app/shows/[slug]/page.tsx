@@ -10,7 +10,6 @@ import { ShowRatingStats, ShowReviewsPanel } from "@/app/shows/[slug]/show-revie
 import { ShowTrailerButton } from "@/app/shows/[slug]/show-trailer-button"
 import { ShowDetailsPanel } from "@/app/shows/[slug]/show-details-panel"
 import { ShowBookingBox } from "@/app/shows/[slug]/show-booking-box"
-import { ShowSidebarExtras } from "@/app/shows/[slug]/show-booking-parts"
 
 export const dynamic = "force-dynamic"
 
@@ -55,7 +54,6 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
   )
 
   const tags = [event.category, "مسرح", event.language].filter((tag) => tag.trim().length > 0)
-  const organizer = { phone: event.troupe.city ? "+201000000000" : "+201000000000", email: `${event.troupe.slug}@kawalees.test` }
 
   return (
     <div className="pb-16">
@@ -138,7 +136,6 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
               bookedSeatIds={bookedSeatIds}
               blockedReason={blocked}
             />
-            <ShowSidebarExtras organizer={organizer} initialWaitlist={12} />
           </aside>
         </div>
       </div>

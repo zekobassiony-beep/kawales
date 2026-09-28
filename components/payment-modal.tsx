@@ -5,9 +5,8 @@ import { Loader2, Receipt, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
 import type { EventWithRelations } from "@/lib/queries"
-import { createTicket, DEFAULT_PAYMENT_METHOD_ID, type PaymentMethod, type Ticket } from "@/lib/tickets"
-import { persistTicket } from "@/app/actions/tickets"
-import { sendReceiptVerification } from "@/app/actions/telegram"
+import { createTicket, DEFAULT_PAYMENT_METHOD_ID, setTicketReceiptUrl, telegramTicketLink, type PaymentMethod, type Ticket } from "@/lib/tickets"
+import { notifyTicketAdmin, persistTicket, type PersistTicketResult } from "@/app/actions/tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { useSession } from "@/lib/session"
 import { PaymentStep, TicketConfirmation } from "@/components/checkout-steps"
@@ -45,6 +44,10 @@ export function PaymentModal({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [ticket, setTicket] = useState<Ticket | null>(null)
+  const [outcome, setOutcome] = useState<PersistTicketResult | null>(null)
+  /** حالة إعادة إرسال إشعار الإدارة (زر الاحتياط عند تعطّل تليجرام). */
+  const [resending, setResending] = useState(false)
+  const [resendNotice, setResendNotice] = useState<string | null>(null)
 
   /* إعادة تهيئة الحالة عند كل فتح للنافذة. */
   useEffect(() => {
@@ -55,6 +58,9 @@ export function PaymentModal({
     setError(null)
     setBusy(false)
     setTicket(null)
+    setOutcome(null)
+    setResending(false)
+    setResendNotice(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -105,23 +111,33 @@ export function PaymentModal({
     })
 
     setTicket(created)
-    setBusy(false)
 
-    // حفظ التذكرة في Supabase (يرفع الإيصال إلى Storage ويحفظ publicUrl في receipt_url).
-    void persistTicket(created).catch(() => undefined)
-    // إرسال الإيصال للإدارة على تليجرام مع أزرار قبول/رفض (fire-and-forget).
-    void sendReceiptVerification({
-      ticketId: created.id,
-      qrPayload: created.qrCode,
-      showTitle: created.showTitle,
-      venue: created.venue,
-      seatsCount: created.seats.length,
-      seatsLabel: created.seats.join("، "),
-      totalCents: created.totalCents,
-      senderPhone: created.senderPhone ?? "",
-      receiptImage: created.receiptImage,
-      paymentMethod: created.paymentMethod,
-    }).catch(() => undefined)
+    // الـ Trigger الموحّد: يحفظ التذكرة + يرفع الإيصال إلى Storage، ثم **يجدول** إشعار
+    // الإدارة على تليجرام في الخلفية — فيعود الرد سريعًا بلا انتظار نداءات تليجرام.
+    const result = await persistTicket(created)
+
+    // استبدال Base64 الثقيل في التخزين المحلي بالرابط العام (أخف بكثير وأسرع في القراءة).
+    if (result.receiptUrl) setTicketReceiptUrl(created.id, result.receiptUrl)
+
+    setOutcome(result)
+    setBusy(false)
+    if (!result.ok) {
+      console.error(`[checkout] تعذّر حفظ التذكرة ${created.id}: ${result.error ?? "سبب غير معروف"}`)
+    }
+  }
+
+  /** إعادة إرسال إشعار الإدارة لتذكرة محفوظة (لو كان تليجرام متعطّلًا لحظة الحجز). */
+  async function resendAdminNotification() {
+    if (!ticket) return
+    setResending(true)
+    setResendNotice(null)
+    const result = await notifyTicketAdmin(ticket.id)
+    setResending(false)
+    setResendNotice(
+      result.ok
+        ? "أعدنا إرسال الطلب إلى الإدارة على تليجرام ✓ — راجع البوت الآن."
+        : result.error ?? "تعذّر إعادة الإرسال — حاول مرة أخرى.",
+    )
   }
 
   return (
@@ -157,6 +173,48 @@ export function PaymentModal({
         {ticket ? (
           <div className="space-y-4 p-5">
             <TicketConfirmation ticket={ticket} onSimulateApproval={() => undefined} />
+
+            {/* حالة حفظ الطلب وإشعار الإدارة (الإشعار يُنفَّذ في الخلفية بلا حجب الواجهة). */}
+            {outcome?.notifyState === "queued" ? (
+              <p role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-[11px] leading-relaxed text-emerald-200">
+                تم حفظ طلبك ✓ — جارٍ إرسال التفاصيل إلى الإدارة على تليجرام. تتحدّث حالة التذكرة
+                هنا تلقائيًا لحظة اعتماد الإيصال.
+              </p>
+            ) : (
+              <p role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-[11px] leading-relaxed text-red-200">
+                تعذّر حفظ طلب التذكرة{outcome?.error ? `: ${outcome.error}` : "."} — أعد المحاولة أو تواصل مع الدعم.
+              </p>
+            )}
+
+            {/* إعادة إرسال الإشعار للإدارة عند الحاجة (تليجرام بطيء/غير متاح لحظة الحجز). */}
+            {outcome?.notifyState === "queued" && !resendNotice && (
+              <button
+                type="button"
+                onClick={() => void resendAdminNotification()}
+                disabled={resending}
+                className="w-full rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-[11px] font-semibold text-sky-200 transition-colors hover:bg-sky-500/20 disabled:opacity-60"
+              >
+                {resending ? "جارٍ إعادة الإرسال…" : "لم يظهر الطلب في البوت؟ أعد إرساله للإدارة"}
+              </button>
+            )}
+            {resendNotice && (
+              <p role="status" className="text-[11px] leading-relaxed text-sky-200">
+                {resendNotice}
+              </p>
+            )}
+
+            {/* إن لم تكن محادثة العميل مربوطة: نطلب الربط برابط البوت مع كود التذكرة (startparam). */}
+            {!outcome?.telegramLinked && (
+              <a
+                href={telegramTicketLink(ticket.id)}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-xl border border-sky-500/50 bg-sky-500/10 p-3 text-center text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-500/20"
+              >
+                اربط تليجرام الآن لاستلام تذكرتك و QR فور اعتمادها ✈️
+              </a>
+            )}
+
             <button
               type="button"
               onClick={onClose}

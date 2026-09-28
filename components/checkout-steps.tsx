@@ -4,9 +4,10 @@ import { useState } from "react"
 import { Armchair, Check, Clock, Copy, Minus, Plus, Ticket as TicketIcon, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, rowLabel, tierForRow } from "@/lib/format"
+import { formatBytes, prepareReceiptImage } from "@/lib/image-compress"
 import { MAX_SEATS_PER_BOOKING, hexToRgba } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
-import { QrCode } from "@/components/qr-code"
+import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { SocialShareButton } from "@/components/social-share-button"
 import { TicketModal } from "@/components/ticket-modal"
 import { TicketUtilityButtons } from "@/components/ticket-utilities"
@@ -24,16 +25,6 @@ import {
  */
 
 const FIELD_CLASS = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
-
-/** يقرأ ملف صورة كـ data URL (Base64) لإرساله للإدارة. */
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error("تعذّر قراءة الملف"))
-    reader.readAsDataURL(file)
-  })
-}
 
 /* ---------- الخطوة 1: اختيار المقاعد (كراسي محددة) ---------- */
 
@@ -218,6 +209,12 @@ export function PaymentStep({
 }) {
   const methods = usePaymentMethods().filter((item) => item.isActive)
   const selected = methods.find((item) => item.id === method) ?? methods[0] ?? null
+  /** حالة تجهيز صورة الإيصال (ضغط/تصغير) قبل تأكيد الدفع. */
+  const [receipt, setReceipt] = useState<{ busy: boolean; note: string | null; error: string | null }>({
+    busy: false,
+    note: null,
+    error: null,
+  })
 
   return (
     <div className="space-y-4">
@@ -303,15 +300,37 @@ export function PaymentStep({
             <input
               type="file"
               accept="image/*"
+              disabled={receipt.busy}
               onChange={async (event) => {
                 const file = event.target.files?.[0]
                 if (!file) return
-                const dataUrl = await readFileAsDataUrl(file)
-                onReceiptChange(dataUrl)
+                setReceipt({ busy: true, note: null, error: null })
+                try {
+                  // ضغط/تصغير الصورة في المتصفح: يقلّل زمن الإرسال من ثوانٍ طويلة إلى أقل من ثانية.
+                  const prepared = await prepareReceiptImage(file)
+                  onReceiptChange(prepared.dataUrl)
+                  setReceipt({
+                    busy: false,
+                    note: prepared.compressed
+                      ? `تم تجهيز الإيصال: ${formatBytes(prepared.bytes)} بدلًا من ${formatBytes(prepared.originalBytes)} ✓`
+                      : `الإيصال جاهز للإرسال: ${formatBytes(prepared.bytes)} ✓`,
+                    error: null,
+                  })
+                } catch {
+                  setReceipt({ busy: false, note: null, error: "تعذّر قراءة صورة الإيصال — جرّب صورة أخرى." })
+                }
               }}
-              className="mt-1 w-full cursor-pointer rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition-colors file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary-foreground focus:border-primary"
+              className="mt-1 w-full cursor-pointer rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground outline-none transition-colors file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary-foreground focus:border-primary disabled:opacity-60"
             />
-            {receiptImage ? (
+            {receipt.busy ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">جارٍ تجهيز صورة الإيصال…</p>
+            ) : receipt.error ? (
+              <p role="alert" className="mt-1 text-[11px] text-red-300">
+                {receipt.error}
+              </p>
+            ) : receipt.note ? (
+              <p className="mt-1 text-[11px] text-emerald-300">{receipt.note}</p>
+            ) : receiptImage ? (
               <p className="mt-1 text-[11px] text-emerald-300">تم إرفاق الإيصال ✓</p>
             ) : (
               <p className="mt-1 text-[11px] text-muted-foreground">صورة واضحة للإيصال تسرّع مراجعة الإدارة.</p>
@@ -533,7 +552,9 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
         <div className="flex flex-col items-center gap-1.5">
           {admitted ? (
             <>
-              <QrCode payload={ticket.qrCode} size={112} onClick={() => setQrOpen(true)} title="اضغط لعرض الرمز بحجم كامل" />
+              <span onClick={() => setQrOpen(true)} title="اضغط لعرض التذكرة كاملة">
+                <TicketQrViewer ticket={ticket} size={112} />
+              </span>
               <button
                 type="button"
                 onClick={() => setQrOpen(true)}

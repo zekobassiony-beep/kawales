@@ -4,7 +4,7 @@ import { useState } from "react"
 import Image from "next/image"
 import { Download, ExternalLink, Gift, Maximize2, RefreshCcw, Share2, Ticket as TicketIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { QrCode } from "@/components/qr-code"
+import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { downloadQrPng } from "@/lib/qr-image"
 import { formatPrice } from "@/lib/format"
 import type { Ticket } from "@/lib/tickets"
@@ -114,7 +114,9 @@ export function TicketPassCard({
 
         <div className="flex flex-col items-center gap-2 border-t border-dashed border-zinc-800 p-4 sm:w-44 sm:border-s sm:border-t-0">
           {status.admitted ? (
-            <QrCode payload={ticket.qrCode} size={104} onClick={() => setOpen(true)} title="اضغط لعرض التذكرة كاملة" />
+            <span onClick={() => setOpen(true)} title="اضغط لعرض التذكرة كاملة">
+              <TicketQrViewer ticket={ticket} size={104} />
+            </span>
           ) : (
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-zinc-700 text-center text-[10px] text-zinc-500">
               <TicketIcon className="h-4 w-4" />

@@ -6,7 +6,7 @@
 -- إضافية على storage.objects للقراءة العامة أو للرفع من السيرفر.
 --
 -- لإنشاء الـ Bucket اختر إحدى الطريقتين:
---   1) شغّل:  node scripts/setup-receipts-storage.mjs
+--   1) شغّل:  node scripts/setup-storage-buckets.mjs
 --   2) أو نفّذ هذا الملف من SQL Editor.
 -- ============================================================
 

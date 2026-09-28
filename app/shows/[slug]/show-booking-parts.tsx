@@ -1,12 +1,11 @@
 "use client"
 
-import { useState } from "react"
-import { BellRing, Mail, Minus, Phone, Plus } from "lucide-react"
+import { Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
 import { metalForTier, type BookingTierLike } from "@/lib/show-detail"
 
-/** أجزاء صندوق الحجز: كارت الفئة المعدني · صف الكمية · كروت الانتظار والتواصل. */
+/** أجزاء صندوق الحجز: كارت الفئة المعدني · صف الكمية. */
 
 export const SIDEBAR_CARD = "rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur"
 
@@ -110,60 +109,4 @@ export function QuantityRow({
   )
 }
 
-/** كارت قائمة الانتظار + التواصل مع المنظم. */
-export function ShowSidebarExtras({
-  organizer,
-  initialWaitlist,
-}: {
-  organizer: { phone: string; email: string }
-  initialWaitlist: number
-}) {
-  const [waitlist, setWaitlist] = useState(initialWaitlist)
-  const [joined, setJoined] = useState(false)
 
-  return (
-    <div className="mt-4 space-y-4">
-      <div className={cn(SIDEBAR_CARD, "p-5")}>
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
-          <BellRing className="h-4 w-4 text-amber-400" />
-          بلّغني لو كراسي فضيت
-        </p>
-        <p className="mt-1 text-[11px] text-zinc-500">{waitlist} شخص في قائمة الانتظار حاليًا.</p>
-        <button
-          type="button"
-          disabled={joined}
-          onClick={() => {
-            setWaitlist((current) => current + 1)
-            setJoined(true)
-          }}
-          className={cn(
-            "mt-3 w-full rounded-xl px-4 py-2.5 text-xs font-bold transition-colors",
-            joined
-              ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-              : "bg-amber-500 text-zinc-950 hover:bg-amber-400",
-          )}
-        >
-          {joined ? "تم تسجيلك في القائمة ✓" : "سجّل في قائمة الانتظار"}
-        </button>
-      </div>
-
-      <div className={cn(SIDEBAR_CARD, "p-5")}>
-        <p className="text-sm font-semibold text-zinc-100">تواصل مع المنظم</p>
-        <ul className="mt-2 space-y-1.5 text-[11px] text-zinc-400">
-          <li>
-            <a className="inline-flex items-center gap-1.5 hover:text-amber-300" href={`tel:${organizer.phone}`} dir="ltr">
-              <Phone className="h-3.5 w-3.5" />
-              {organizer.phone}
-            </a>
-          </li>
-          <li>
-            <a className="inline-flex items-center gap-1.5 hover:text-amber-300" href={`mailto:${organizer.email}`} dir="ltr">
-              <Mail className="h-3.5 w-3.5" />
-              {organizer.email}
-            </a>
-          </li>
-        </ul>
-      </div>
-    </div>
-  )
-}

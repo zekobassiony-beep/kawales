@@ -1,7 +1,7 @@
 "use client"
 
 import { X } from "lucide-react"
-import { QrCode } from "@/components/qr-code"
+import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { formatPrice } from "@/lib/format"
 import { paymentMethodLabel, type Ticket } from "@/lib/tickets"
 import { ATTENDANCE_POLICY, tierMetal } from "@/lib/ticket-pass"
@@ -39,7 +39,7 @@ export function TicketPassModal({
 
         <div className="space-y-3 p-4">
           <div className="mx-auto rounded-2xl bg-white p-2">
-            <QrCode payload={ticket.qrCode} size={240} />
+            <TicketQrViewer ticket={ticket} size={240} />
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-300">

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Armchair, Gift, Share2, ShoppingBag, Ticket } from "lucide-react"
+import { Armchair, ShoppingBag, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
@@ -39,7 +39,6 @@ export function ShowBookingBox({
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState(tiers[0]?.id ?? "")
   const [quantity, setQuantity] = useState(1)
-  const [notice, setNotice] = useState<string | null>(null)
   const [pay, setPay] = useState<PaymentSelection | null>(null)
 
   const selectedTier = tiers.find((tier) => tier.id === selectedId) ?? tiers[0]
@@ -77,15 +76,12 @@ export function ShowBookingBox({
   }, [interactive, selectedSeats, tiers, selectedTier, quantity])
 
   const toggleSeat = (seatId: string) => {
-    setNotice(null)
     if (selectedSeats.includes(seatId)) {
       setSelectedSeats(selectedSeats.filter((id) => id !== seatId))
       return
     }
-    if (selectedSeats.length >= MAX_SEATS_PER_BOOKING) {
-      setNotice(`يمكنك اختيار حتى ${MAX_SEATS_PER_BOOKING} مقاعد لكل حجز.`)
-      return
-    }
+    // الحد الأقصى للمقاعد في الطلب الواحد (تظهر التلميحة أسفل خريطة الكراسي).
+    if (selectedSeats.length >= MAX_SEATS_PER_BOOKING) return
     setSelectedSeats([...selectedSeats, seatId])
   }
 
@@ -148,7 +144,6 @@ export function ShowBookingBox({
                     onSelect={() => {
                       setSelectedId(tier.id)
                       setQuantity(1)
-                      setNotice(null)
                     }}
                   />
                 ))}
@@ -180,42 +175,10 @@ export function ShowBookingBox({
           </button>
         ) : (
           <p className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-center text-xs text-zinc-400">
-            {soldOut ? "نفدت تذاكر هذا العرض — سجّل في قائمة الانتظار." : blockedReason ?? "الحجز غير متاح حاليًا."}
+            {soldOut ? "نفدت تذاكر هذا العرض." : blockedReason ?? "الحجز غير متاح حاليًا."}
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setNotice(`سيتم إرسال رابط هدية لعرض «${event.title}» إلى البريد الذي تختاره.`)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-800 px-3 py-2.5 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60"
-          >
-            <Gift className="h-3.5 w-3.5" />
-            هدية 🎁
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const url = `${window.location.origin}/shows/${event.slug}`
-              if (typeof navigator !== "undefined" && navigator.share) {
-                void navigator.share({ title: event.title, url }).catch(() => undefined)
-                return
-              }
-              void navigator.clipboard.writeText(url).catch(() => undefined)
-              setNotice("تم نسخ رابط العرض 🔗")
-            }}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-800 px-3 py-2.5 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60"
-          >
-            <Share2 className="h-3.5 w-3.5" />
-            مشاركة 🔗
-          </button>
-        </div>
-
-        {notice && (
-          <p role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
-            {notice}
-          </p>
-        )}
       </div>
 
       {pay && <PaymentModal event={event} selection={pay} open onClose={() => setPay(null)} />}

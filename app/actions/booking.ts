@@ -7,7 +7,8 @@ import { tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
 import { calculateTotals } from "@/lib/pricing"
 import { bookingBlockedReason } from "@/lib/booking-rules"
-import { sendBookingNotification } from "@/lib/telegram"
+import { sendBookingNotification, type BookingNotification } from "@/lib/telegram"
+import { runInBackground } from "@/lib/background"
 
 export type BookingResult =
   | { ok: true; reference: string; totalCents: number }
@@ -224,9 +225,10 @@ export async function createBooking(input: {
 
     await client.query("COMMIT")
 
-    // إشعار تليجرام بعد نجاح الحجز — لا يُفشل الحجز أبدًا (sendBookingNotification لا ترمي).
+    // إشعار تليجرام بعد نجاح الحجز — يُنفَّذ في الخلفية (لا يحجب المستخدم) ولا يُفشل الحجز أبدًا
+    // (sendBookingNotification لا ترمي، وrunInBackground تتكفّل بأي استثناء).
     if (eventStartsAt) {
-      await sendBookingNotification({
+      const notification: BookingNotification = {
         reference,
         eventTitle,
         venueName,
@@ -244,7 +246,11 @@ export async function createBooking(input: {
         serviceFeeCents: totals.serviceFeeCents,
         totalCents,
         receipt,
-      })
+      }
+      await runInBackground(
+        () => sendBookingNotification(notification),
+        `إشعار الحجز ${reference}`,
+      )
     }
 
     return { ok: true, reference, totalCents }

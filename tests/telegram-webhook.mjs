@@ -13,6 +13,8 @@ if (!token) {
 const args = process.argv.slice(2)
 const infoOnly = args.includes("--info")
 const url = args.find((value) => value.startsWith("http")) ?? ""
+const secretArg = args.find((value) => value.startsWith("--secret="))
+const secret = secretArg ? secretArg.slice("--secret=".length) : process.env.TELEGRAM_WEBHOOK_SECRET ?? ""
 
 async function callTelegram(method, payload) {
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -32,6 +34,7 @@ if (!infoOnly) {
     url,
     allowed_updates: ["callback_query", "message"],
     drop_pending_updates: true,
+    ...(secret ? { secret_token: secret } : {}),
   })
   console.log(`setWebhook (${registered.status}):`, JSON.stringify(registered.payload))
   if (!registered.payload?.ok) process.exit(1)

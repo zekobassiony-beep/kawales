@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Download, Maximize2, X } from "lucide-react"
-import { QrCode } from "@/components/qr-code"
+import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { downloadQrPng } from "@/lib/qr-image"
 import { formatPrice } from "@/lib/format"
 import type { Ticket } from "@/lib/tickets"
@@ -67,7 +67,7 @@ export function TicketModal({ ticket, onClose }: { ticket: Ticket | null; onClos
 
         <div className="space-y-4 p-5">
           <div className="flex justify-center rounded-2xl bg-white p-2">
-            <QrCode payload={ticket.qrCode} size={300} />
+            <TicketQrViewer ticket={ticket} size={300} />
           </div>
 
           <div className="grid gap-1 text-center text-xs text-muted-foreground">

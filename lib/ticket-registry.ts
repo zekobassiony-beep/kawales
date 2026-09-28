@@ -1,5 +1,13 @@
 import type { Ticket, TicketStatus } from "@/lib/tickets"
-import { getTicketFromDb, updateTicketStatusInDb, upsertTicketInDb } from "@/lib/supabase/tickets"
+import {
+  getTicketFromDb,
+  setTicketImageUrlInDb,
+  setTicketTelegramChatIdInDb,
+  updateTicketStatusInDb,
+  upsertTicketInDb,
+} from "@/lib/supabase/tickets"
+import { uploadTicketImageToStorage } from "@/lib/supabase/storage"
+import { buildTicketQrPng } from "@/lib/telegram-ticket-image"
 
 /**
  * سجل التذاكر على الخادم — الآن مبني على جدول `tickets` في **Supabase** (Postgres).
@@ -158,18 +166,60 @@ export async function getTicketRecord(id: string): Promise<ServerTicketRecord | 
   return fallback.get(ticketId)
 }
 
+/* ---------- توليد صورة التذكرة (من بوت تليجرام) وحفظها لعرض الموقع ---------- */
+
+/**
+ * يولّد صورة التذكرة/QR (نفس صورة البوت) ويرفعها إلى Supabase Storage، ثم
+ * يحفظ رابطها العام على التذكرة (`ticket_image_url`) ليعرضه الموقع كـ Viewer.
+ * يعيد الرابط عند النجاح، أو null مع تسجيل صريح للسبب.
+ */
+export async function publishTicketImage(ticketId: string, qrPayload: string): Promise<string | null> {
+  const id = normalize(ticketId)
+  console.log(`[tickets] توليد صورة التذكرة ${id}…`)
+  const png = buildTicketQrPng(qrPayload, 12)
+  const upload = await uploadTicketImageToStorage(id, png)
+  if (!upload.ok) {
+    console.error(`[tickets] تعذّر رفع صورة التذكرة ${id} إلى Storage: ${upload.error}`)
+    return null
+  }
+  const saved = await setTicketImageUrlInDb(id, upload.publicUrl)
+  if (!saved) {
+    console.warn(`[tickets] لم يُحفظ ticket_image_url للتذكرة ${id} (هل شُغّل scripts/tickets-telegram.sql؟)`)
+  }
+  console.log(`[tickets] صورة التذكرة ${id} جاهزة: ${upload.publicUrl}`)
+  return upload.publicUrl
+}
+
 /* ---------- ربط شات تليجرام العميل بالتذكرة (لإرسال QR عند القبول) ---------- */
 
 const telegramChats = new Map<string, number>()
 
-/** يربط chat_id بتذكرة (عندما يُرسل العميل `/start KW-XXXXXX` للبوت). */
-export function linkTelegramChat(id: string, chatId: number): void {
-  telegramChats.set(normalize(id), chatId)
+/** يربط chat_id بتذكرة (عندما يُرسل العميل `/start KW-XXXXXX` للبوت) — في الذاكرة وقاعدة البيانات. */
+export async function linkTelegramChat(id: string, chatId: number): Promise<void> {
+  const ticketId = normalize(id)
+  telegramChats.set(ticketId, chatId)
+  const stored = await setTicketTelegramChatIdInDb(ticketId, String(chatId))
+  if (stored) {
+    console.log(`[telegram] ربط محادثة ${chatId} بالتذكرة ${ticketId} ✓`)
+  } else {
+    console.warn(`[telegram] ربط محادثة ${chatId} بالتذكرة ${ticketId} في الذاكرة فقط (قاعدة البيانات غير متاحة).`)
+  }
 }
 
-/** يعيد chat_id المربوط بالتذكرة (لإرسال رمز QR للعميل في التليجرام). */
-export function getTelegramChatId(id: string): number | undefined {
-  return telegramChats.get(normalize(id))
+/** يعيد chat_id المربوط بالتذكرة (من الذاكرة أولًا ثم قاعدة البيانات) لإرسال التذكرة للعميل. */
+export async function getTelegramChatId(id: string): Promise<number | undefined> {
+  const ticketId = normalize(id)
+  const cached = telegramChats.get(ticketId)
+  if (cached) return cached
+  const ticket = await getTicketFromDb(ticketId)
+  if (ticket?.telegramChatId) {
+    const parsed = Number(ticket.telegramChatId)
+    if (Number.isFinite(parsed)) {
+      telegramChats.set(ticketId, parsed)
+      return parsed
+    }
+  }
+  return undefined
 }
 
 /**

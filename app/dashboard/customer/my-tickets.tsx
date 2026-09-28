@@ -5,7 +5,7 @@ import { Clock, Loader2, QrCode as QrCodeIcon, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
 import { SectionTitle, StatusBadge } from "@/app/dashboard/ui"
-import { QrCode } from "@/components/qr-code"
+import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { SocialShareButton } from "@/components/social-share-button"
 import { TicketModal } from "@/components/ticket-modal"
 import { useSession } from "@/lib/session"
@@ -215,12 +215,9 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
         <div className="flex flex-col items-center gap-1">
           {admitted ? (
             <>
-              <QrCode
-                payload={ticket.qrCode}
-                size={104}
-                onClick={() => setQrOpen(true)}
-                title="اضغط لعرض الرمز بحجم كامل"
-              />
+              <span onClick={() => setQrOpen(true)} title="اضغط لعرض التذكرة كاملة">
+                <TicketQrViewer ticket={ticket} size={104} />
+              </span>
               <button
                 type="button"
                 onClick={() => setQrOpen(true)}

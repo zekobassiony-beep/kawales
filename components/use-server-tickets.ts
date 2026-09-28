@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { listMyTickets } from "@/app/actions/tickets"
-import type { Ticket } from "@/lib/tickets"
+import { syncTicketStatusesFromServer, type Ticket } from "@/lib/tickets"
+
+/** الفاصل الزمني لاستطلاع قرارات الإدارة على تليجرام (ميلي ثانية). */
+const POLL_INTERVAL_MS = 6000
 
 /**
- * يقرأ تذاكر المستخدم حيًا من Supabase عبر إجراء الخادم `listMyTickets`.
- * يُستخدم في لوحة العميل ولوحة العمليات لعرض الحجوزات الحقيقية من قاعدة البيانات.
+ * يقرأ تذاكر المستخدم حيًا من Supabase عبر إجراء الخادم `listMyTickets`،
+ * ويعيد القراءة دوريًا حتى تنعكس قرارات الإدارة (قبول/رفض من تليجرام) وصورة
+ * التذكرة تلقائيًا بلا تحديث يدوي للصفحة.
  */
 export function useServerTickets(customerId?: string): {
   tickets: Ticket[]
@@ -16,17 +20,25 @@ export function useServerTickets(customerId?: string): {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
 
-  /** إعادة تحميل الحجوزات يدويًا (زر «تحديث البيانات» في لوحة السوبر أدمن). */
+  /** قراءة التذاكر من الخادم (`silent` = بلا مؤشر تحميل، للاستطلاع الدوري). */
+  const load = useCallback(
+    async (silent: boolean) => {
+      if (!silent) setLoading(true)
+      try {
+        setTickets(await listMyTickets(customerId))
+      } catch {
+        // نتجاهل الفشل ونُبقي آخر قراءة ناجحة.
+      } finally {
+        if (!silent) setLoading(false)
+      }
+    },
+    [customerId],
+  )
+
+  /** إعادة تحميل الحجوزات يدويًا (زر «تحديث البيانات» في اللوحات). */
   const reload = useCallback(async () => {
-    setLoading(true)
-    try {
-      setTickets(await listMyTickets(customerId))
-    } catch {
-      // نتجاهل الفشل ونُبقي آخر قراءة ناجحة.
-    } finally {
-      setLoading(false)
-    }
-  }, [customerId])
+    await load(false)
+  }, [load])
 
   useEffect(() => {
     let cancelled = false
@@ -39,10 +51,20 @@ export function useServerTickets(customerId?: string): {
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
+
+    // استطلاع دوري: يزامن الحالة المحلية مع السيرفر (قرار تليجرام) ويعيد قراءة القائمة.
+    const timer = window.setInterval(() => {
+      if (cancelled) return
+      void syncTicketStatusesFromServer()
+      void load(true)
+    }, POLL_INTERVAL_MS)
+
     return () => {
       cancelled = true
+      window.clearInterval(timer)
     }
-  }, [customerId])
+  }, [customerId, load])
 
   return { tickets, loading, reload }
 }
+

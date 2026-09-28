@@ -45,6 +45,13 @@ export type Ticket = {
   receiptImage?: string
   /** رقم الموبايل الذي تم التحويل منه. */
   senderPhone?: string
+  /** معرّف محادثة تليجرام للعميل (يُربط عبر `/start` في البوت) لإرسال التذكرة له. */
+  telegramChatId?: string
+  /**
+   * رابط صورة التذكرة/QR التي يولّدها بوت تليجرام ويخزّنها في Supabase Storage.
+   * الموقع يعرض هذه الصورة فقط (Viewer) — وتكون متاحة بعد اعتماد الإدارة.
+   */
+  ticketImageUrl?: string
   /** حمولة رمز QR (مرجع التذكرة + العرض). */
   qrCode: string
   /** وقت اعتماد الأوتوميشن (تليجرام/SMS) — لا يوجد قبل التحقق. */
@@ -309,6 +316,92 @@ export function applyAutomationUpdate(input: {
   }
 }
 
+/* ---------- مزامنة الحالة من السيرفر (قرار الإدارة على تليجرام) ---------- */
+
+/** تحديث حالة تذكرة كما تعيده `/api/tickets/statuses` (مصدر الحقيقة للوحات). */
+export type ServerTicketStatusUpdate = {
+  id: string
+  status: TicketStatus
+  /** رابط صورة التذكرة/QR التي يولّدها بوت تليجرام (يتوفر بعد الاعتماد). */
+  ticketImageUrl?: string | null
+}
+
+/**
+ * يدمج تحديثًا قادمًا من السيرفر في تذكرة محلية (دالة نقية قابلة للاختبار).
+ * يعيد `null` إن لم يكن هناك تغيير يستحق الحفظ (لتقليل إعادة الرسم وكتابة التخزين).
+ */
+export function mergeServerTicketUpdate(ticket: Ticket, update: ServerTicketStatusUpdate): Ticket | null {
+  const reference = update.id.trim().toUpperCase()
+  if (ticket.id !== reference) return null
+
+  const imageUrl = update.ticketImageUrl?.trim() ? update.ticketImageUrl.trim() : undefined
+  const statusChanged = ticket.status !== update.status
+  const imageChanged = Boolean(imageUrl) && ticket.ticketImageUrl !== imageUrl
+  if (!statusChanged && !imageChanged) return null
+
+  const next: Ticket = { ...ticket, status: update.status }
+  if (imageUrl) next.ticketImageUrl = imageUrl
+  if (statusChanged && update.status === "approved") {
+    next.verifiedAt = next.verifiedAt ?? new Date().toISOString()
+    next.verifiedVia = next.verifiedVia ?? "telegram"
+  }
+  return next
+}
+
+/**
+ * يطبّق تحديث السيرفر على التخزين المحلي (لا يُنشئ تذاكر غير موجودة محليًا).
+ * يعيد `true` إن تغيّرت التذكرة فعلًا — وهو ما يجعل الواجهة تتحدث فور اعتماد الإدارة.
+ */
+export function applyServerTicketUpdate(update: ServerTicketStatusUpdate): boolean {
+  if (typeof window === "undefined") return false
+  const reference = update.id.trim().toUpperCase()
+  const current = readTickets()
+  const index = current.findIndex((ticket) => ticket.id === reference)
+  if (index < 0) return false
+
+  const merged = mergeServerTicketUpdate(current[index], { ...update, id: reference })
+  if (!merged) return false
+
+  mutateTickets((list) => list.map((item, position) => (position === index ? merged : item)))
+  return true
+}
+
+/** هل ما زالت التذكرة تحتاج متابعة من السيرفر؟ (لا نطارد تذاكر محسومة أو مستخدمة). */
+function needsServerSync(ticket: Ticket): boolean {
+  return ticket.status === "pending" || ticket.status === "approved"
+}
+
+/**
+ * يزامن حالات مجموعة تذاكر من السيرفر بنداء واحد مجمّع، ويعيد عدد التذاكر التي تغيّرت.
+ * يُستدعى من الاستطلاع الحيّ في الواجهة (لوحة العميل + معرض QR).
+ */
+export async function syncTicketStatusesFromServer(ids?: string[]): Promise<number> {
+  if (typeof window === "undefined") return 0
+  const candidates = (ids ?? readTickets().filter(needsServerSync).map((ticket) => ticket.id))
+    .map((id) => id.trim().toUpperCase())
+    .filter(Boolean)
+  if (candidates.length === 0) return 0
+
+  try {
+    const response = await fetch(
+      `/api/tickets/statuses?ids=${encodeURIComponent(candidates.join(","))}`,
+      { cache: "no-store" },
+    )
+    if (!response.ok) return 0
+    const payload = (await response.json()) as { tickets?: ServerTicketStatusUpdate[] }
+    if (!Array.isArray(payload.tickets)) return 0
+
+    let changed = 0
+    for (const update of payload.tickets) {
+      if (applyServerTicketUpdate(update)) changed += 1
+    }
+    return changed
+  } catch {
+    // فشل الشبكة لا يجب أن يُعطّل الواجهة — نُعيد المحاولة في النبضة التالية.
+    return 0
+  }
+}
+
 /* ---------- قراءة حيّة لتذكرة واحدة (تحديث تلقائي فور اعتماد البوت) ---------- */
 
 const getNullSnapshot = () => null
@@ -323,16 +416,57 @@ export function useTicket(reference: string): Ticket | null {
 }
 
 /**
- * نبضة تحقق دورية للانتظار الأنيق: تفحص تحديث الأوتوميشن من التخزين المحلي
- * (وكذلك أي تحديث يصل من تبويب آخر) وتُعيد دالة إيقاف النبضة.
+ * نبضة تحقق دورية للانتظار الأنيق: تزامن حالات التذاكر المعلّقة مع السيرفر
+ * (قرار الإدارة على تليجرام: `approve_/reject_`) وتحدّث الواجهة لحظة الاعتماد،
+ * مع إطلاق حدث محلي لالتقاط أي تحديث من تبويب آخر.
+ *
+ * تتوقف تلقائيًا بعد `maxDurationMs` أو عند بقاء التذاكر محسومة، فلا استهلاك دائم للشبكة.
  */
-export function startTicketStatusPolling(intervalMs = 4000): () => void {
+export function startTicketStatusPolling(intervalMs = 4000, maxDurationMs = 10 * 60 * 1000): () => void {
   if (typeof window === "undefined") return () => undefined
-  const timer = window.setInterval(() => {
-    // أي تغيير في التخزين يُطلق حدث المتجر ويُحدّث الحالة المعلّقة تلقائيًا.
+
+  const startedAt = Date.now()
+  let stopped = false
+  let inFlight = false
+
+  function stop(): void {
+    if (stopped) return
+    stopped = true
+    window.clearInterval(timer)
+  }
+
+  const tick = async (): Promise<void> => {
+    if (stopped || inFlight) return
+    if (Date.now() - startedAt > maxDurationMs) {
+      stop()
+      return
+    }
     window.dispatchEvent(new Event(TICKETS_CHANGE_EVENT))
-  }, intervalMs)
-  return () => window.clearInterval(timer)
+    inFlight = true
+    try {
+      await syncTicketStatusesFromServer()
+    } finally {
+      inFlight = false
+    }
+  }
+
+  const timer = window.setInterval(() => void tick(), intervalMs)
+  void tick()
+
+  return stop
+}
+
+/**
+ * يستبدل صورة الإيصال المخزّنة محليًا (Base64 ثقيل) بالرابط العام بعد رفعها على
+ * السيرفر — يمنع تضخّم `localStorage` وبطء القراءة/الكتابة.
+ */
+export function setTicketReceiptUrl(reference: string, receiptUrl: string): void {
+  const id = reference.trim().toUpperCase()
+  const url = receiptUrl.trim()
+  if (!url) return
+  const target = readTickets().find((ticket) => ticket.id === id)
+  if (!target || target.receiptImage === url) return
+  mutateTickets((list) => list.map((ticket) => (ticket.id === id ? { ...ticket, receiptImage: url } : ticket)))
 }
 
 /** عدد التذاكر المعلّقة على مراجعة الإيصال لمستخدم واحد. */

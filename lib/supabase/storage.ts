@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { getSupabaseAdmin } from "@/lib/supabase/server"
+import { withTimeout } from "@/lib/with-timeout"
 
 /**
  * تخزين إيصالات الدفع على Supabase Storage.
@@ -18,8 +19,17 @@ import { getSupabaseAdmin } from "@/lib/supabase/server"
 /** اسم الـ Bucket العام لإيصالات الدفع. */
 export const RECEIPTS_BUCKET = "receipts"
 
+/**
+ * اسم الـ Bucket العام لصور التذاكر/QR التي يولّدها بوت تليجرام ويخزّنها
+ * ليعرضها الموقع (الموقع «معرض/عرض» فقط لهذه الصورة).
+ */
+export const TICKETS_BUCKET = "tickets"
+
 /** الحد الأقصى لحجم صورة الإيصال (5 ميجابايت). */
 export const RECEIPTS_MAX_SIZE_BYTES = 5 * 1024 * 1024
+
+/** مهلة عمليات التخزين (رفع/قراءة) — تمنع تعليق الحجز على Storage بطيء. */
+const STORAGE_TIMEOUT_MS = 12_000
 
 export type UploadReceiptInput = {
   /** data URL كاملة (data:image/...;base64,...) أو Base64 خام. */
@@ -99,14 +109,64 @@ export async function uploadReceiptToStorage(input: UploadReceiptInput): Promise
   const path = buildPath(input.ticketId, extension)
 
   try {
-    const { error } = await admin.storage.from(RECEIPTS_BUCKET).upload(path, decoded.bytes, {
-      contentType: decoded.mimeType,
-      cacheControl: "3600",
-      upsert: false,
-    })
-    if (error) return { ok: false, error: error.message }
+    // رفع بمهلة قصوى: التخزين البطيء لا يجوز أن يُعلّق تأكيد الحجز.
+    let uploadError: string | null = null
+    try {
+      const { error } = await withTimeout(
+        admin.storage.from(RECEIPTS_BUCKET).upload(path, decoded.bytes, {
+          contentType: decoded.mimeType,
+          cacheControl: "3600",
+          upsert: false,
+        }),
+        STORAGE_TIMEOUT_MS,
+        "storage.uploadReceipt",
+      )
+      uploadError = error ? error.message : null
+    } catch (error) {
+      uploadError = error instanceof Error ? error.message : String(error)
+    }
+    if (uploadError) return { ok: false, error: uploadError }
 
     const { data } = admin.storage.from(RECEIPTS_BUCKET).getPublicUrl(path)
+    return { ok: true, publicUrl: data.publicUrl, path }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * يرفع صورة التذكرة/QR (PNG يولّده بوت تليجرام على السيرفر) إلى Bucket `tickets`
+ * ويعيد رابطها العام — وهو الرابط الذي يُحفظ في `ticket_image_url` ويعرضه الموقع.
+ */
+export async function uploadTicketImageToStorage(
+  ticketId: string,
+  png: Uint8Array,
+): Promise<{ ok: true; publicUrl: string; path: string } | { ok: false; error: string }> {
+  const admin = getSupabaseAdmin()
+  if (!admin) return { ok: false, error: "Supabase غير مهيأ (تحقق من متغيّرات البيئة)." }
+
+  const safe = ticketId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "ticket"
+  const path = `${safe}-${Date.now()}.png`
+
+  try {
+    let uploadError: string | null = null
+    try {
+      const { error } = await withTimeout(
+        admin.storage.from(TICKETS_BUCKET).upload(path, png, {
+          contentType: "image/png",
+          cacheControl: "3600",
+          upsert: true,
+        }),
+        STORAGE_TIMEOUT_MS,
+        "storage.uploadTicketImage",
+      )
+      uploadError = error ? error.message : null
+    } catch (error) {
+      uploadError = error instanceof Error ? error.message : String(error)
+    }
+    if (uploadError) return { ok: false, error: uploadError }
+
+    const { data } = admin.storage.from(TICKETS_BUCKET).getPublicUrl(path)
     return { ok: true, publicUrl: data.publicUrl, path }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
