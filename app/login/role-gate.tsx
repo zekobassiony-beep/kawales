@@ -4,10 +4,12 @@ import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { Check, Drama, Loader2, Lock, LogOut, Mail, Sparkles, X } from "lucide-react"
+import { Check, Drama, Loader2, Lock, LogOut, Mail, ShieldCheck, Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ONBOARDING_PATH, ROLE_LABELS, ROLE_META, ROLE_ORDER, type AccountRole } from "@/lib/roles"
 import { dashboardPathForUser, signIn, signOut, useSession } from "@/lib/session"
+import { ADMIN_DASHBOARD_PATH, isMasterAdminEmail } from "@/lib/auth-constants"
+import { useAdminAccess } from "@/components/use-admin-access"
 import { SupabaseAuthPanel } from "@/app/login/supabase-auth-panel"
 
 /** صور معبّرة عن كل نوع حساب (جمهور/ممثل/فرقة/مسرح) — تُستخدم ككروت وخلفيات ديناميكية. */
@@ -49,6 +51,7 @@ export function RoleGate() {
   const [hoveredRole, setHoveredRole] = useState<AccountRole | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
   const user = useSession()
+  const admin = useAdminAccess()
   const closeAuth = useCallback(() => setAuthOpen(false), [])
 
   const active = hoveredRole ?? selected
@@ -123,6 +126,15 @@ export function RoleGate() {
               {ROLE_LABELS[user.role]}){!user.onboarded && " — لم تكمل بياناتك بعد"}
             </span>
             <span className="flex items-center gap-2">
+              {admin.allowed && (
+                <Link
+                  href={ADMIN_DASHBOARD_PATH}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  لوحة الإدارة
+                </Link>
+              )}
               <Link
                 href={dashboardPathForUser(user)}
                 className="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
@@ -157,6 +169,19 @@ export function RoleGate() {
 
         <p className="mt-6 text-center text-xs text-foreground/75 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
           الدخول تجريبي (بريد وكلمة مرور أو Google OAuth تجريبي) والجلسة تُحفظ في متصفحك فقط.
+        </p>
+
+        {/* مدخل الأدمن: يظهر دائمًا (بلا كشف أي بيانات) — والحماية الفعلية على السيرفر. */}
+        <p className="mt-3 flex flex-wrap items-center justify-center gap-1.5 text-center text-xs text-foreground/80 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
+          <ShieldCheck className="h-3.5 w-3.5 text-amber-300" />
+          أدمن كواليس؟ ادخل ببريد الإدارة من أي بطاقة، أو افتح
+          <Link
+            href={ADMIN_DASHBOARD_PATH}
+            className="font-semibold text-amber-300 underline decoration-dotted underline-offset-4"
+          >
+            لوحة الإدارة
+          </Link>
+          مباشرة.
         </p>
       </div>
 
@@ -302,6 +327,17 @@ function AuthModal({ role, open, onClose }: { role: AccountRole; open: boolean; 
     }
     setError("")
     signIn({ email: trimmedEmail, role })
+
+    // بريد السوبر أدمن: يفتح لوحة الإدارة مباشرة بدل خطوات إكمال بيانات الفئة.
+    if (isMasterAdminEmail(trimmedEmail)) {
+      startTransition(() => {
+        router.push(ADMIN_DASHBOARD_PATH)
+        // تحديث كامل ليقرأ الوسيط كوكي الجلسة الجديد ويسمح بالمرور.
+        router.refresh()
+      })
+      return
+    }
+
     goToOnboarding()
   }
 
@@ -425,6 +461,17 @@ function AuthModal({ role, open, onClose }: { role: AccountRole; open: boolean; 
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
             الدخول أعلاه جلسة حقيقية عبر Supabase (Google أو كود البريد). النموذج التجريبي بالأعلى يبقى متاحًا للعرض
             فقط وبلا كلمة مرور حقيقية.
+          </p>
+
+          <p className="flex flex-wrap items-center justify-center gap-1.5 text-center text-[11px] leading-relaxed text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-amber-300" />
+            للأدمن: ادخل ببريد السوبر أدمن وسيُوجَّهك تلقائيًا إلى
+            <Link
+              href={ADMIN_DASHBOARD_PATH}
+              className="font-semibold text-amber-300 underline decoration-dotted underline-offset-4"
+            >
+              لوحة الإدارة
+            </Link>
           </p>
         </form>
       </div>

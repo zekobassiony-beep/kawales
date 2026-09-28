@@ -3,9 +3,10 @@
 import { useEffect, useId, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronDown, Clapperboard, Drama, LayoutDashboard, LogIn, LogOut, Theater, Users, X } from "lucide-react"
+import { ChevronDown, Clapperboard, Drama, LayoutDashboard, LogIn, LogOut, ShieldCheck, Theater, Users, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LOGIN_PATH, ROLE_LABELS, dashboardPathForUser, signOut, useSession } from "@/lib/session"
+import { useAdminAccess } from "@/components/use-admin-access"
 
 /** البيانات التي يجهّزها الـ Server Component (`site-header.tsx`) للقائمة الجانبية. */
 export type SiteHeaderNavData = {
@@ -133,6 +134,7 @@ export function SiteHeaderClient({ nav }: { nav: SiteHeaderNavData }) {
   const [open, setOpen] = useState(false)
   const [openSection, setOpenSection] = useState<DrawerSectionKey | null>(null)
   const user = useSession()
+  const admin = useAdminAccess()
   const router = useRouter()
   const drawerId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
@@ -235,6 +237,16 @@ export function SiteHeaderClient({ nav }: { nav: SiteHeaderNavData }) {
           <div className="flex items-center gap-2">
             {user ? (
               <>
+                {admin.allowed && (
+                  <Link
+                    href="/admin"
+                    title="لوحة الإدارة — قبول الحجوزات وإدارة المسؤولين"
+                    className="inline-flex items-center gap-2 rounded-full border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    <span className="hidden md:inline">لوحة الإدارة</span>
+                  </Link>
+                )}
                 <Link
                   href={dashboardHref}
                   title="لوحة التحكم"
@@ -395,6 +407,22 @@ export function SiteHeaderClient({ nav }: { nav: SiteHeaderNavData }) {
                 {user ? ROLE_LABELS[user.role] : "سجّل الدخول أولًا"}
               </span>
             </Link>
+
+            {admin.allowed && (
+              <Link
+                href="/admin"
+                onClick={closeDrawer}
+                className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+              >
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4" />
+                  لوحة الإدارة
+                </span>
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  {admin.master ? "سوبر أدمن" : "أدمن"}
+                </span>
+              </Link>
+            )}
           </nav>
 
           <div className="flex items-center gap-5 border-t border-border/60 px-4 py-4 text-sm text-muted-foreground">

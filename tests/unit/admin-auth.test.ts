@@ -8,6 +8,7 @@ import {
   isAdminPath,
   isMasterAdminEmail,
   normalizeAdminEmail,
+  parseMasterEmails,
 } from "../../lib/auth-constants"
 
 describe("isAdminPath (حماية مسارات الأدمن)", () => {
@@ -72,5 +73,25 @@ describe("اختصارات لوحات التشغيل (producer / gatekeeper)", (
     for (const email of MASTER_ADMIN_EMAILS) {
       assert.equal(normalizeAdminEmail(email), email, "يجب أن تكون البريدات مُطبَّعة بحروف صغيرة")
     }
+  })
+})
+
+describe("parseMasterEmails (إضافة بريدات سوبر أدمن من البيئة)", () => {
+  it("يفصل بالفواصل والمسافات والفواصل المنقوطة ويُطبّع الحروف", () => {
+    assert.deepEqual(parseMasterEmails("A@X.com, b@y.com; c@z.com  D@w.com"), [
+      "a@x.com",
+      "b@y.com",
+      "c@z.com",
+      "d@w.com",
+    ])
+  })
+
+  it("يتجاهل القيم الفارغة وغير البريدية ويُزيل التكرار", () => {
+    assert.deepEqual(parseMasterEmails(" owner@kawalees.com , owner@kawalees.com , , not-an-email "), [
+      "owner@kawalees.com",
+    ])
+    assert.deepEqual(parseMasterEmails(""), [])
+    assert.deepEqual(parseMasterEmails(undefined), [])
+    assert.deepEqual(parseMasterEmails("   ;  ,  "), [])
   })
 })

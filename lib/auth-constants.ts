@@ -12,14 +12,41 @@
  */
 const DEFAULT_MASTER_ADMIN_EMAIL = "zeko.bassiony@gmail.com"
 
-/** يقرأ بريدات السوبر أدمن الإضافية من متغيّرات البيئة. */
+/**
+ * يفكّ قائمة بريدات مفصولة بفواصل/مسافات/فاصلات منقوطة ويُطبّعها
+ * (حروف صغيرة + تجاهل أي قيمة ليست بريدًا) — دالة نقية قابلة للاختبار.
+ */
+export function parseMasterEmails(raw: string | null | undefined): string[] {
+  return Array.from(
+    new Set(
+      String(raw ?? "")
+        .split(/[,\s;]+/)
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.includes("@")),
+    ),
+  )
+}
+
+/**
+ * يقرأ بريدات السوبر أدمن الإضافية من متغيّرات البيئة (سيرفر + متصفح).
+ *
+ * ⚠️ الوصول لـ `process.env.X` هنا **ثابت (حرفي)** عن قصد: Next يستبدل هذا النوع
+ * بالقيمة وقت البناء في الوسيط والمتصفح، أما الوصول الديناميكي (`env[key]`) فلا يعمل هناك.
+ */
 function readMasterEmailsFromEnv(): string[] {
-  return [process.env.MASTER_ADMIN_EMAIL, process.env.MASTER_ADMIN_EMAILS, process.env.SUPER_ADMIN_EMAIL]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .join(",")
-    .split(/[,\s;]+/)
-    .map((value) => value.trim().toLowerCase())
-    .filter((value) => value.includes("@"))
+  return parseMasterEmails(
+    [
+      process.env.MASTER_ADMIN_EMAIL,
+      process.env.MASTER_ADMIN_EMAILS,
+      process.env.SUPER_ADMIN_EMAIL,
+      // نسخة عامة (NEXT_PUBLIC_) ليتمكّن المتصفح أيضًا من عرض رابط «لوحة الإدارة»
+      // لنفس البريدات المُضافة على السيرفر.
+      process.env.NEXT_PUBLIC_MASTER_ADMIN_EMAIL,
+      process.env.NEXT_PUBLIC_MASTER_ADMIN_EMAILS,
+    ]
+      .filter((value): value is string => Boolean(value && value.trim()))
+      .join(","),
+  )
 }
 
 /** كل بريدات السوبر أدمن المعتمدة (الافتراضي + ما يُضاف من البيئة). */
