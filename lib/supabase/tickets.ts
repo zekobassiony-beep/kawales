@@ -2,6 +2,7 @@ import type { Ticket, TicketStatus } from "@/lib/tickets"
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server"
 import { TICKETS_TABLE } from "@/lib/supabase/config"
 import { emailToUserId } from "@/lib/supabase/ids"
+import { normalizeTicketStatus } from "@/lib/ticket-status"
 
 /**
  * طبقة الوصول لجدول `tickets` على Supabase (Postgres) — مصدر الحقيقة للتذاكر.
@@ -32,9 +33,13 @@ export type TicketRow = {
   created_at: string | null
 }
 
+/**
+ * يُطبّع حالة الصف القادمة من قاعدة البيانات إلى الحالات الأربع المعتمدة —
+ * فيفهم `approved` و`ACTIVE` و`confirmed` على حد سواء (قبل ذلك كانت أي صيغة أخرى
+ * تُقرأ كـ «pending» فتختفي التذكرة المقبولة من الواجهة).
+ */
 function asStatus(value: string | null | undefined): TicketStatus {
-  if (value === "checked_in" || value === "approved" || value === "rejected") return value
-  return "pending"
+  return normalizeTicketStatus(value)
 }
 
 /** يعيد بناء حمولة رمز QR بنفس صيغة العميل (`kawalees:ticket:{id}:{showId}`). */

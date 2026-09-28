@@ -228,6 +228,18 @@ try {
     if (response.status === 200) pass(`GET ${asset} is served`)
     else fail(`GET ${asset} returned ${response.status}`)
   }
+
+  // 9. Operator dashboards are gated: an anonymous visitor is redirected to /login
+  for (const path of ["/admin", "/producer", "/gatekeeper"]) {
+    const response = await fetch(baseUrl + path, { redirect: "manual" })
+    const location = response.headers.get("location") ?? ""
+    await response.text().catch(() => "")
+    if (response.status >= 300 && response.status < 400 && location.includes("/login")) {
+      pass(`GET ${path} is gated and redirects to /login`)
+    } else {
+      fail(`GET ${path} returned ${response.status} (expected a redirect to /login, got location "${location}")`)
+    }
+  }
 } catch (error) {
   fail(`smoke run crashed: ${error.message}`)
   if (serverLog.trim()) console.error(`\n--- server output ---\n${serverLog}`)

@@ -2,6 +2,11 @@
 
 import { useSyncExternalStore } from "react"
 import { sendTelegramNotification } from "@/lib/telegram"
+import {
+  isTicketPending,
+  normalizeTicketStatus,
+  type TicketStatus,
+} from "@/lib/ticket-status"
 
 /**
  * منظومة التذاكر والمدفوعات المباشرة (Checkout & Direct Payment Gateway).
@@ -11,7 +16,19 @@ import { sendTelegramNotification } from "@/lib/telegram"
  * كل من صفحة الحجز ولوحة العميل عبر `useTickets()` أو القراءات المباشرة.
  */
 
-export type TicketStatus = "pending" | "approved" | "rejected" | "checked_in"
+/** يُعاد تصدير أدوات الحالة الموحّدة ليستوردها كل من الواجهة والسيرفر من مكان واحد. */
+export {
+  TICKET_STATUSES,
+  TICKET_STATUS_LABELS,
+  isTicketAccepted,
+  isTicketPending,
+  isTicketRejected,
+  normalizeTicketStatus,
+  ticketStatusLabel,
+  ticketStatusTone,
+} from "@/lib/ticket-status"
+export type { TicketStatus } from "@/lib/ticket-status"
+
 /** معرّف وسيلة الدفع — نص حر لأن الوسائل تُدار ديناميكيًا من لوحة العمليات. */
 export type PaymentMethod = string
 /** معرّفات وسائل الدفع الافتراضية. */
@@ -81,13 +98,6 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
 /** اسم وسيلة الدفع المعروض للجمهور — يرجع للمعرّف إن كانت وسيلة مضافة حديثًا. */
 export function paymentMethodLabel(id: string): string {
   return PAYMENT_METHOD_LABELS[id] ?? id
-}
-
-export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
-  pending: "قيد مراجعة الإيصال",
-  approved: "مقبول — QR فعّال",
-  rejected: "مرفوض",
-  checked_in: "تم الحضور — مسحت عند البوابة",
 }
 
 /* ---------- أوتوميشن التليجرام و SMS ---------- */
@@ -335,13 +345,14 @@ export function mergeServerTicketUpdate(ticket: Ticket, update: ServerTicketStat
   if (ticket.id !== reference) return null
 
   const imageUrl = update.ticketImageUrl?.trim() ? update.ticketImageUrl.trim() : undefined
-  const statusChanged = ticket.status !== update.status
+  const status = normalizeTicketStatus(update.status)
+  const statusChanged = normalizeTicketStatus(ticket.status) !== status
   const imageChanged = Boolean(imageUrl) && ticket.ticketImageUrl !== imageUrl
   if (!statusChanged && !imageChanged) return null
 
-  const next: Ticket = { ...ticket, status: update.status }
+  const next: Ticket = { ...ticket, status }
   if (imageUrl) next.ticketImageUrl = imageUrl
-  if (statusChanged && update.status === "approved") {
+  if (statusChanged && status === "approved") {
     next.verifiedAt = next.verifiedAt ?? new Date().toISOString()
     next.verifiedVia = next.verifiedVia ?? "telegram"
   }
@@ -471,7 +482,7 @@ export function setTicketReceiptUrl(reference: string, receiptUrl: string): void
 
 /** عدد التذاكر المعلّقة على مراجعة الإيصال لمستخدم واحد. */
 export function pendingReviewCount(customerId: string): number {
-  return getTicketsForUser(customerId).filter((ticket) => ticket.status === "pending").length
+  return getTicketsForUser(customerId).filter((ticket) => isTicketPending(ticket.status)).length
 }
 
 /** نتيجة فحص التذكرة عند البوابة. */
@@ -498,7 +509,9 @@ export function checkInTicket(ticketId: string): CheckInResult {
     return { outcome: "not_found", ticket: null, message: `لا توجد تذكرة بالكود ${reference} في المنصة.` }
   }
 
-  if (ticket.status === "checked_in") {
+  const status = normalizeTicketStatus(ticket.status)
+
+  if (status === "checked_in") {
     return {
       outcome: "already_used",
       ticket,
@@ -507,7 +520,7 @@ export function checkInTicket(ticketId: string): CheckInResult {
     }
   }
 
-  if (ticket.status !== "approved") {
+  if (status !== "approved") {
     return {
       outcome: "not_verified",
       ticket,
@@ -529,7 +542,9 @@ export function checkInTicket(ticketId: string): CheckInResult {
 
 /** تذاكر حضرت فعلًا لعرض معيّن (تُستعمل في شارة «جمهور موثق»). */
 export function checkedInTicketsForShow(showId: string): Ticket[] {
-  return readTickets().filter((ticket) => ticket.showId === String(showId) && ticket.status === "checked_in")
+  return readTickets().filter(
+    (ticket) => ticket.showId === String(showId) && normalizeTicketStatus(ticket.status) === "checked_in",
+  )
 }
 
 /** ساعة الحضور بصيغة مختصرة (للعرض في الماسح). */
@@ -547,15 +562,91 @@ export function formatCheckInTime(value?: string): string {
 
 /** تذاكر قابلة للمسح الآن (مقبولة من الإدارة ولم تُستخدم بعد). */
 export function scannableTickets(): Ticket[] {
-  return readTickets().filter((ticket) => ticket.status === "approved")
+  return readTickets().filter((ticket) => normalizeTicketStatus(ticket.status) === "approved")
 }
 
-/** تقسيم تذاكر المستخدم إلى قادمة (حسب موعد العرض) وسابقة. */
+/**
+ * تقسيم تذاكر المستخدم إلى قادمة (حسب موعد العرض) وسابقة.
+ *
+ * ⚠️ التذكرة بلا موعد صالح (مثل صف قادم من قاعدة البيانات التي لا تخزّن `starts_at`)
+ * تُعتبر **قادمة** — الخطأ في العرض لا يجوز أن يُخفي تذكرة مقبولة عن صاحبها.
+ */
 export function splitTickets(tickets: Ticket[], now = Date.now()): { upcoming: Ticket[]; past: Ticket[] } {
-  return {
-    upcoming: tickets.filter((ticket) => new Date(ticket.startsAt).getTime() >= now),
-    past: tickets.filter((ticket) => new Date(ticket.startsAt).getTime() < now),
+  const upcoming: Ticket[] = []
+  const past: Ticket[] = []
+
+  for (const ticket of tickets) {
+    const start = new Date(ticket.startsAt ?? "").getTime()
+    if (Number.isFinite(start) && start < now) past.push(ticket)
+    else upcoming.push(ticket)
   }
+
+  return { upcoming, past }
+}
+
+/** الحقول المرجعية التي يجب أن تأتي دائمًا من قاعدة البيانات (مصدر الحقيقة). */
+const SERVER_AUTHORITATIVE_FIELDS = [
+  "status",
+  "ticketImageUrl",
+  "receiptImage",
+  "senderPhone",
+  "telegramChatId",
+  "verifiedAt",
+  "verifiedVia",
+  "checkedInAt",
+] as const
+
+/**
+ * يدمج تذكرة السيرفر في نظيرتها المحلية:
+ * - الحالة ورابط صورة التذكرة (`ticket_image_url`) وبقية الحقول المرجعية من **السيرفر**.
+ * - البيانات العرضية (العرض، المكان، الموعد، المقاعد، البوستر…) من **المحلي** لأن
+ *   جدول `tickets` لا يخزّنها — وهذا ما كان يجعل البطاقة تظهر فارغة سابقًا.
+ */
+export function mergeTicketRecords(local: Ticket, server: Ticket): Ticket {
+  const merged: Ticket = { ...local }
+
+  for (const field of SERVER_AUTHORITATIVE_FIELDS) {
+    const value = server[field]
+    if (value === undefined || value === null || value === "") continue
+    // الحقول المرجعية تُطبَّع (تفهم approved/ACTIVE/confirmed).
+    if (field === "status") merged.status = normalizeTicketStatus(value)
+    else Object.assign(merged, { [field]: value })
+  }
+
+  // إكمال العرض من السيرفر عند غيابه محليًا (مثل تذكرة أُنشئت من جهاز آخر).
+  merged.showTitle = merged.showTitle || server.showTitle
+  merged.venue = merged.venue || server.venue
+  merged.startsAt = merged.startsAt || server.startsAt
+  merged.startsAtIso = merged.startsAtIso || server.startsAtIso
+  merged.seats = merged.seats.length > 0 ? merged.seats : server.seats
+  merged.tierName = merged.tierName || server.tierName
+  merged.totalCents = merged.totalCents || server.totalCents
+  merged.posterUrl = merged.posterUrl ?? server.posterUrl
+  merged.paymentMethod = merged.paymentMethod || server.paymentMethod
+  merged.paymentRef = merged.paymentRef || server.paymentRef
+  merged.customerName = merged.customerName || server.customerName
+  merged.customerId = merged.customerId || server.customerId
+
+  return merged
+}
+
+/**
+ * يدمج قائمة تذاكر السيرفر مع المخزن المحلي بلا تكرار:
+ * السيرفر أولًا (مرجعي) ثم المحلي غير الموجود.
+ */
+export function mergeTicketSources(serverTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
+  const localById = new Map(localTickets.map((ticket) => [ticket.id, ticket]))
+  const merged = new Map<string, Ticket>()
+
+  for (const server of serverTickets) {
+    const local = localById.get(server.id)
+    merged.set(server.id, local ? mergeTicketRecords(local, server) : server)
+  }
+  for (const local of localTickets) {
+    if (!merged.has(local.id)) merged.set(local.id, local)
+  }
+
+  return Array.from(merged.values()).sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
 }
 
 function mutateTickets(updater: (current: Ticket[]) => Ticket[]): void {

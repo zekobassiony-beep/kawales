@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 import {
   ADMIN_DASHBOARD_PATH,
   MASTER_ADMIN_EMAIL,
+  MASTER_ADMIN_EMAILS,
   SESSION_EMAIL_COOKIE,
   isAdminPath,
   isMasterAdminEmail,
@@ -48,5 +49,28 @@ describe("البريد الأساسي للسوبر أدمن", () => {
     assert.equal(ADMIN_DASHBOARD_PATH, "/dashboard/admin")
     assert.equal(SESSION_EMAIL_COOKIE, "kawalees:email")
     assert.equal(MASTER_ADMIN_EMAIL, "zeko.bassiony@gmail.com")
+  })
+})
+
+describe("اختصارات لوحات التشغيل (producer / gatekeeper)", () => {
+  it("تُحمى بنفس بوابة الأدمن", () => {
+    assert.equal(isAdminPath("/producer"), true)
+    assert.equal(isAdminPath("/gatekeeper"), true)
+    assert.equal(isAdminPath("/producer/shows"), true)
+    assert.equal(isAdminPath("/gatekeeper/scan"), true)
+  })
+
+  it("لا تقبل مسارات تشترك في البادئة فقط (أمان)", () => {
+    for (const path of ["/producers", "/gatekeepers", "/producer-other", "/gate"]) {
+      assert.equal(isAdminPath(path), false, path)
+    }
+  })
+
+  it("قائمة بريدات السوبر أدمن تحتوي البريد الافتراضي وتقبل الإضافة من البيئة", () => {
+    assert.ok(MASTER_ADMIN_EMAILS.length >= 1)
+    assert.ok(MASTER_ADMIN_EMAILS.includes("zeko.bassiony@gmail.com"))
+    for (const email of MASTER_ADMIN_EMAILS) {
+      assert.equal(normalizeAdminEmail(email), email, "يجب أن تكون البريدات مُطبَّعة بحروف صغيرة")
+    }
   })
 })

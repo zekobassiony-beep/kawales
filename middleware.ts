@@ -2,9 +2,9 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import {
   ADMIN_USERS_TABLE,
-  MASTER_ADMIN_EMAIL,
   SESSION_EMAIL_COOKIE,
   isAdminPath,
+  isMasterAdminEmail,
   normalizeAdminEmail,
 } from "@/lib/auth-constants"
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config"
@@ -83,7 +83,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // (3) السوبر أدمن الأساسي: دخول فوري.
-  if (email === MASTER_ADMIN_EMAIL) return response
+  if (isMasterAdminEmail(email)) return response
 
   // (4) بقية الأدمنز: من جدول admin_users على Supabase.
   if (await isEmailInAdminTable(email)) return response
@@ -95,6 +95,16 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/dashboard/admin", "/dashboard/admin/:path*"],
+  matcher: [
+    "/admin",
+    "/admin/:path*",
+    "/dashboard/admin",
+    "/dashboard/admin/:path*",
+    // اختصارات لوحات التشغيل (مخرج العروض وبوابة المسرح) — محميّة بنفس بوابة الأدمن.
+    "/producer",
+    "/producer/:path*",
+    "/gatekeeper",
+    "/gatekeeper/:path*",
+  ],
 }
 

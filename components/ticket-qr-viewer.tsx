@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { ImageIcon, Loader2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { QrCode } from "@/components/qr-code"
-import { applyServerTicketUpdate, type Ticket, type TicketStatus } from "@/lib/tickets"
+import { applyServerTicketUpdate, isTicketAccepted, normalizeTicketStatus, type Ticket, type TicketStatus } from "@/lib/tickets"
 
 /** الفاصل بين محاولات جلب صورة التذكرة/الحالة من السيرفر. */
 const POLL_INTERVAL_MS = 5000
@@ -30,7 +30,7 @@ export function TicketQrViewer({
   const [imageUrl, setImageUrl] = useState<string | null>(ticket.ticketImageUrl ?? null)
   const [stalled, setStalled] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
-  const admitted = status === "approved" || status === "checked_in"
+  const admitted = isTicketAccepted(status)
 
   // مزامنة فورية لما يصل من الأعلى (استطلاع اللوحة أو نافذة أخرى).
   useEffect(() => {
@@ -53,11 +53,12 @@ export function TicketQrViewer({
         const data = (await response.json()) as { status?: TicketStatus; imageUrl?: string | null }
         if (!active) return
         if (data.status) {
-          setStatus(data.status)
+          const nextStatus = normalizeTicketStatus(data.status)
+          setStatus(nextStatus)
           // تحديث المخزن المحلي أيضًا ليتغيّر كامل الواجهة (الشارات، لوحة العميل…).
           applyServerTicketUpdate({
             id: ticket.id,
-            status: data.status,
+            status: nextStatus,
             ticketImageUrl: data.imageUrl ?? null,
           })
         }

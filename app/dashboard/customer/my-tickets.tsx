@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Clock, Loader2, QrCode as QrCodeIcon, Ticket } from "lucide-react"
+import { Clock, Download, Loader2, QrCode as QrCodeIcon, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
 import { SectionTitle, StatusBadge } from "@/app/dashboard/ui"
@@ -11,12 +11,17 @@ import { TicketModal } from "@/components/ticket-modal"
 import { useSession } from "@/lib/session"
 import { useServerTickets } from "@/components/use-server-tickets"
 import {
-  TICKET_STATUS_LABELS,
   formatCheckInTime,
   getTicketsForUser,
+  isTicketAccepted,
+  isTicketPending,
+  isTicketRejected,
+  mergeTicketSources,
   paymentMethodLabel,
   splitTickets,
   startTicketStatusPolling,
+  ticketStatusLabel,
+  ticketStatusTone,
   useTickets,
   type Ticket as LocalTicket,
 } from "@/lib/tickets"
@@ -31,19 +36,16 @@ export function MyTickets() {
   const tickets = useTickets()
   const viewerEmail = session?.email ?? ""
   const { tickets: serverTickets } = useServerTickets(viewerEmail)
-  const mine = useMemo(() => {
-    const local = getTicketsForUser(viewerEmail)
-    if (serverTickets.length === 0) return local
-    // سجل الخادم أولًا (مصدر الحقيقة) ثم المحلي غير المكرر.
-    const merged = new Map<string, LocalTicket>()
-    for (const ticket of serverTickets) merged.set(ticket.id, ticket as LocalTicket)
-    for (const ticket of local) if (!merged.has(ticket.id)) merged.set(ticket.id, ticket)
-    return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  }, [tickets, viewerEmail, serverTickets])
+  const mine = useMemo(
+    // دمج ذكي: الحالة ورابط صورة التذكرة من قاعدة البيانات (مصدر الحقيقة)،
+    // وبيانات العرض (العنوان، المكان، الموعد، المقاعد) من المخزن المحلي.
+    () => mergeTicketSources(serverTickets, getTicketsForUser(viewerEmail)),
+    [tickets, viewerEmail, serverTickets],
+  )
   const { upcoming, past } = useMemo(() => splitTickets(mine), [mine])
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming")
   const [openId, setOpenId] = useState<string | null>(null)
-  const pendingCount = mine.filter((ticket) => ticket.status === "pending").length
+  const pendingCount = mine.filter((ticket) => isTicketPending(ticket.status)).length
 
   /* تحديث تلقائي لحالة التذاكر لحظة اعتماد الأوتوميشن للتحويل. */
   useEffect(() => {
@@ -106,17 +108,13 @@ export function CustomerTicketStats() {
   const tickets = useTickets()
   const viewerEmail = session?.email ?? ""
   const { tickets: serverTickets } = useServerTickets(viewerEmail)
-  const mine = useMemo(() => {
-    const local = getTicketsForUser(viewerEmail)
-    if (serverTickets.length === 0) return local
-    const merged = new Map<string, LocalTicket>()
-    for (const ticket of serverTickets) merged.set(ticket.id, ticket as LocalTicket)
-    for (const ticket of local) if (!merged.has(ticket.id)) merged.set(ticket.id, ticket)
-    return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  }, [tickets, viewerEmail, serverTickets])
+  const mine = useMemo(
+    () => mergeTicketSources(serverTickets, getTicketsForUser(viewerEmail)),
+    [tickets, viewerEmail, serverTickets],
+  )
   const { upcoming } = useMemo(() => splitTickets(mine), [mine])
-  const approved = mine.filter((ticket) => ticket.status === "approved" || ticket.status === "checked_in").length
-  const pending = mine.filter((ticket) => ticket.status === "pending").length
+  const approved = mine.filter((ticket) => isTicketAccepted(ticket.status)).length
+  const pending = mine.filter((ticket) => isTicketPending(ticket.status)).length
   const last = mine[0]
 
   const cards = [
@@ -175,9 +173,7 @@ function TicketButton({ ticket, open, onToggle }: { ticket: LocalTicket; open: b
           </span>
           <span className="mt-1 block font-mono text-xs text-primary">{ticket.id}</span>
         </span>
-        <StatusBadge tone={ticket.status === "pending" ? "amber" : ticket.status === "rejected" ? "red" : "green"}>
-          {TICKET_STATUS_LABELS[ticket.status]}
-        </StatusBadge>
+        <StatusBadge tone={ticketStatusTone(ticket.status)}>{ticketStatusLabel(ticket.status)}</StatusBadge>
       </button>
       {open && <TicketDetails ticket={ticket} />}
     </div>
@@ -185,12 +181,42 @@ function TicketButton({ ticket, open, onToggle }: { ticket: LocalTicket; open: b
 }
 
 function TicketDetails({ ticket }: { ticket: LocalTicket }) {
-  const admitted = ticket.status === "approved" || ticket.status === "checked_in"
-  const pending = ticket.status === "pending"
-  const rejected = ticket.status === "rejected"
+  const admitted = isTicketAccepted(ticket.status)
+  const pending = isTicketPending(ticket.status)
+  const rejected = isTicketRejected(ticket.status)
   const [qrOpen, setQrOpen] = useState(false)
   return (
     <div className="space-y-3 border-t border-border/60 p-4">
+      {/* بطاقة التذكرة الكاملة: صورة التذكرة/QR المولّدة من تليجرام + العرض/التنزيل */}
+      {admitted && (
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+          <p className="text-center text-[11px] font-semibold text-primary">
+            {ticket.ticketImageUrl
+              ? "تذكرة تليجرام الرسمية — اعرضها عند بوابة المسرح"
+              : "رمز الدخول جاهز — تُصدر صورة التذكرة من تليجرام لحظة اعتماد الإيصال"}
+          </p>
+          <TicketQrViewer ticket={ticket} size={200} />
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-3 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              <QrCodeIcon className="h-3 w-3" /> عرض / تنزيل التذكرة
+            </button>
+            {ticket.ticketImageUrl && (
+              <a
+                href={ticket.ticketImageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-border/60 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-secondary/40"
+              >
+                <Download className="h-3 w-3" /> فتح الصورة في نافذة جديدة
+              </a>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <ul className="min-w-0 space-y-1 text-xs text-muted-foreground">
           <li><span className="font-medium text-foreground">الكود:</span> <span className="font-mono" dir="ltr">{ticket.id}</span></li>
