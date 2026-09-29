@@ -27,6 +27,8 @@ export type TicketRow = {
   telegram_chat_id?: string | null
   /** رابط صورة التذكرة/QR التي يولّدها بوت تليجرام (عمود اختياري). */
   ticket_image_url?: string | null
+  /** وقت تسجيل الحضور عند البوابة (عمود اختياري — `scripts/tickets-checkin.sql`). */
+  checked_in_at?: string | null
   status: string
   total_price: number
   seats: string[]
@@ -67,6 +69,7 @@ export function rowToTicket(row: TicketRow): Ticket {
     senderPhone: row.sender_phone ?? undefined,
     telegramChatId: row.telegram_chat_id ? String(row.telegram_chat_id) : undefined,
     ticketImageUrl: row.ticket_image_url ?? undefined,
+    checkedInAt: row.checked_in_at ?? undefined,
     qrCode: deriveQrCode(row.id, row.show_id),
     createdAt: row.created_at ?? new Date().toISOString(),
   }
@@ -277,6 +280,90 @@ export async function updateTicketStatusInDb(ticketId: string, status: TicketSta
   }
 }
 
+/* ---------- تسجيل الحضور عند البوابة (Gate Check-in) على السيرفر ---------- */
+
+export type DbCheckInOutcome = "accepted" | "already_used" | "not_verified" | "not_found"
+
+export type DbCheckInResult = {
+  outcome: DbCheckInOutcome
+  ticket: Ticket | null
+  /** وقت الحضور المسجّل (للتذكرة المقبولة أو المستخدمة مسبقًا). */
+  checkedInAt?: string
+  /** سبب تقني عند تعذّر الكتابة (يُسجَّل في اللوج ويُعرض للمشغّل). */
+  error?: string
+}
+
+/**
+ * يسجّل حضور تذكرة **بمنع تكرار ذرّي** (Atomic Duplicate Prevention).
+ *
+ * الحماية من التكرار ليست في الكود بل في شرط التحديث نفسه:
+ *   `update … where id = $1 and status <> 'checked_in'`
+ * لذا لو مسح مشغّلان التذكرة نفسها في نفس اللحظة، يتأثر صف واحد فقط ويقرأ
+ * الثاني «مستخدمة مسبقًا» — بلا حالة تسابق (Race Condition).
+ */
+export async function checkInTicketInDb(rawTicketId: string): Promise<DbCheckInResult> {
+  const id = rawTicketId.trim().toUpperCase()
+  if (!id) return { outcome: "not_found", ticket: null, error: "معرّف التذكرة فارغ." }
+
+  const admin = getSupabaseAdmin()
+  if (!admin) {
+    const error = "Supabase admin غير مهيأ — تعذّر تسجيل الحضور على السيرفر."
+    console.error(`[supabase] check-in ${id} فشل: ${error}`)
+    return { outcome: "not_found", ticket: null, error }
+  }
+
+  const checkedInAt = new Date().toISOString()
+
+  /** تحديث محروس: لا يُحدّث إلا تذكرة لم تُستخدم بعد. */
+  const guardedUpdate = async (
+    payload: Record<string, unknown>,
+  ): Promise<{ rows: TicketRow[]; error: unknown }> => {
+    try {
+      const { data, error } = await admin
+        .from(TICKETS_TABLE)
+        .update(payload)
+        .eq("id", id)
+        .neq("status", "checked_in")
+        .select()
+      return { rows: (data ?? []) as TicketRow[], error }
+    } catch (error) {
+      return { rows: [], error }
+    }
+  }
+
+  let attempt = await guardedUpdate({ status: "checked_in", checked_in_at: checkedInAt })
+
+  if (attempt.error) {
+    const normalized = toDbWriteError(attempt.error)
+    const missingColumn = normalized.code === "PGRST204" || normalized.code === "42703"
+    if (missingColumn && (normalized.column === "checked_in_at" || /checked_in_at/i.test(normalized.message))) {
+      console.warn(
+        "[supabase] العمود checked_in_at غير موجود — شغّل scripts/tickets-checkin.sql. سيُسجَّل الحضور بلا وقت.",
+      )
+      attempt = await guardedUpdate({ status: "checked_in" })
+    }
+    if (attempt.error) {
+      const failed = toDbWriteError(attempt.error)
+      logDbWriteError(`check-in ticket ${id}`, failed)
+      return { outcome: "not_found", ticket: null, error: failed.message }
+    }
+  }
+
+  const updated = attempt.rows[0]
+  if (updated) {
+    console.log(`[supabase] سُجّل حضور التذكرة ${id} في ${checkedInAt}`)
+    return { outcome: "accepted", ticket: rowToTicket(updated), checkedInAt: updated.checked_in_at ?? checkedInAt }
+  }
+
+  // لم يتأثر أي صف ⇒ لم تُوجد، أو مستخدمة مسبقًا، أو غير مقبولة بعد.
+  const existing = await getTicketFromDb(id)
+  if (!existing) return { outcome: "not_found", ticket: null }
+  if (normalizeTicketStatus(existing.status) === "checked_in") {
+    return { outcome: "already_used", ticket: existing, checkedInAt: existing.checkedInAt }
+  }
+  return { outcome: "not_verified", ticket: existing }
+}
+
 /** يُحدّث صورة الإيصال ورقم المحوّل ويعيد التذكرة إلى «قيد المراجعة». */
 export async function updateTicketReceiptInDb(
   ticketId: string,
@@ -360,12 +447,29 @@ export async function getTicketFromDb(ticketId: string): Promise<Ticket | null> 
   }
 }
 
+/**
+ * أقصى عدد صفوف تُقرأ في النداء الواحد.
+ *
+ * ⚠️ السبب: بدون حد، لوحة الأدمن كانت تقرأ **كل** التذاكر في كل استطلاع؛
+ * عند ٢٥٦٠٠ تذكرة صار كل نداء ≈٩ ميجابايت كل ٦ ثوانٍ ⇒ استهلاك يقتل حصة
+ * النقل والذاكرة في أول ساعة. الحد يحمي اللوحة، والأرقام الإجمالية تأتي من
+ * `getTicketStatsFromDb` (تجميع في قاعدة البيانات بنداء صغير).
+ */
+export const TICKET_LIST_LIMIT = Math.max(50, Number(process.env.TICKETS_LIST_LIMIT ?? 1000) || 1000)
+
 /** يقرأ تذاكر مستخدم واحد من Supabase (مرتبة من الأحدث)، أو null عند الفشل. */
-export async function listTicketsFromDb(customerId?: string): Promise<Ticket[] | null> {
+export async function listTicketsFromDb(
+  customerId?: string,
+  limit: number = TICKET_LIST_LIMIT,
+): Promise<Ticket[] | null> {
   const client = getSupabaseAdmin() ?? getSupabaseServer()
   if (!client) return null
   try {
-    let query = client.from(TICKETS_TABLE).select("*").order("created_at", { ascending: false })
+    let query = client
+      .from(TICKETS_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(Math.max(1, limit))
     if (customerId) {
       // البريد ⇒ نفس UUIDv5 المستخدم عند الحفظ (ليعود صاحب التذكرة لرؤية تذاكره).
       const userId = emailToUserId(customerId)
@@ -380,5 +484,118 @@ export async function listTicketsFromDb(customerId?: string): Promise<Ticket[] |
   } catch (error) {
     console.warn(`[supabase] list tickets errored: ${describe(error)}`)
     return null
+  }
+}
+
+/* ---------- أرقام إجمالية دقيقة بلا تحميل الصفوف (للوحة الإدارة) ---------- */
+
+/** نتيجة إحصاءات التذاكر + مصدرها (لشفافية العرض في الواجهة). */
+export type TicketStats = {
+  /** `rpc` = دالة تجميع في القاعدة (الأدق والأسرع)، `counts` = عدّ لكل حالة، `unavailable` = تعذّر. */
+  source: "rpc" | "counts" | "unavailable"
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  checkedIn: number
+  /** مجموع المقاعد للتذاكر المقبولة/الحاضرة. */
+  seats: number
+  /** الإيراد بالقروش للتذاكر المقبولة/الحاضرة. */
+  revenueCents: number
+}
+
+const EMPTY_STATS: TicketStats = {
+  source: "unavailable",
+  total: 0,
+  pending: 0,
+  approved: 0,
+  rejected: 0,
+  checkedIn: 0,
+  seats: 0,
+  revenueCents: 0,
+}
+
+/** يحوّل صف دالة التجميع إلى `TicketStats` بأمان (الأرقام قد تصل نصوصًا من PostgREST). */
+function toTicketStatsRow(row: Record<string, unknown>): Omit<TicketStats, "source"> {
+  const num = (value: unknown): number => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return {
+    total: num(row.total),
+    pending: num(row.pending),
+    approved: num(row.approved),
+    rejected: num(row.rejected),
+    checkedIn: num(row.checked_in ?? row.checkedIn),
+    seats: num(row.seats),
+    revenueCents: num(row.revenue ?? row.revenueCents),
+  }
+}
+
+/**
+ * أرقام التذاكر الإجمالية للوحة الإدارة **بنداء واحد صغير**.
+ *
+ * المسار الأول: دالة `kawalees_ticket_stats` في القاعدة (`scripts/ticket-stats.sql`)
+ * — تجميع كامل في صف واحد، فلا تُنقل صفوف التذاكر إلى المتصفح إطلاقًا.
+ * وإن لم تكن الدالة مُشغَّلة، نسقط إلى عدّ دقيق لكل حالة (٥ نداءات رأس صغيرة)
+ * مع إيراد ومقاعد من القائمة المحدودة — فتظل الأعداد صحيحة بلا كسر للوحة.
+ */
+export async function getTicketStatsFromDb(): Promise<TicketStats> {
+  const admin = getSupabaseAdmin()
+  if (!admin) {
+    console.warn("[supabase] إحصاءات التذاكر غير متاحة: عميل الخدمة غير مهيأ.")
+    return EMPTY_STATS
+  }
+
+  // (1) دالة التجميع — الأفضل: صف واحد بلا نقل صفوف.
+  try {
+    const { data, error } = await admin.rpc("kawalees_ticket_stats")
+    if (!error && Array.isArray(data) && data.length > 0) {
+      return { source: "rpc", ...toTicketStatsRow(data[0] as Record<string, unknown>) }
+    }
+    if (error) {
+      console.warn(
+        `[supabase] دالة kawalees_ticket_stats غير متاحة (${error.message}) — سيُستخدم العدّ البديل. ` +
+          "شغّل scripts/ticket-stats.sql للأرقام الأدق.",
+      )
+    }
+  } catch (error) {
+    console.warn(`[supabase] نداء kawalees_ticket_stats فشل: ${describe(error)}`)
+  }
+
+  // (2) بديل: عدّ دقيق لكل حالة عبر أربعة نداءات رأس صغيرة (بلا صفوف).
+  const countFor = async (status: string): Promise<number | null> => {
+    try {
+      const { count, error } = await admin
+        .from(TICKETS_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("status", status)
+      return error ? null : (count ?? 0)
+    } catch {
+      return null
+    }
+  }
+
+  const [total, pending, approved, rejected, checkedIn] = await Promise.all([
+    countFor("pending"),
+    countFor("pending"),
+    countFor("approved"),
+    countFor("rejected"),
+    countFor("checked_in"),
+  ])
+
+  if (total === null || pending === null) return EMPTY_STATS
+
+  // الإجمالي الحقيقي يأتي من عدّ كل الحالات المعروفة + المعلّقة.
+  const known = (approved ?? 0) + (rejected ?? 0) + (checkedIn ?? 0) + pending
+  return {
+    source: "counts",
+    total: known,
+    pending,
+    approved: approved ?? 0,
+    rejected: rejected ?? 0,
+    checkedIn: checkedIn ?? 0,
+    seats: 0,
+    revenueCents: 0,
   }
 }

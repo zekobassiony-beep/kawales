@@ -6,6 +6,7 @@ import { SiteFooter } from '@/components/site-footer'
 import { FlashBanner } from '@/components/flash-banner'
 import { SupabaseSessionSync } from '@/components/supabase-session-sync'
 import './globals.css'
+import { DevInspectorMount } from "@/components/dev-inspector-mount"
 
 const playfair = Playfair_Display({
   subsets: ['latin'],
@@ -44,6 +45,7 @@ export default function RootLayout({
         <main className="flex-1">{children}</main>
         <SiteFooter />
         {process.env.NODE_ENV === 'production' && <Analytics />}
+        <DevInspectorMount />
       </body>
     </html>
   )

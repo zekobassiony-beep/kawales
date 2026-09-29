@@ -5,6 +5,7 @@ import {
   buildShowtimeCards,
   castRoster,
   groupDiscount,
+  lowestPriceCents,
   mapsUrlFor,
   metalForTier,
   occupancyInfo,
@@ -135,5 +136,26 @@ describe("بطاقات المواعيد", () => {
     assert.equal(cards[0].isCurrent, true)
     assert.equal(cards[1].status, "sold_out")
     assert.equal(cards[1].statusLabel, "مباع")
+  })
+})
+
+describe("سعر البداية (lowestPriceCents)", () => {
+  it("يعيد أقل سعر حقيقي بين الفئات", () => {
+    assert.equal(lowestPriceCents([{ priceCents: 25000 }, { priceCents: 15000 }]), 15000)
+  })
+
+  it("لا يُصفّر الناتج خطأً (إضافة صفر إلى قائمة الأسعار كانت تُصفّره دائمًا)", () => {
+    assert.notEqual(lowestPriceCents([{ priceCents: 25000 }]), 0)
+    assert.equal(lowestPriceCents([{ priceCents: 25000 }, { priceCents: 30000 }]), 25000)
+  })
+
+  it("يعيد صفرًا فعليًا لعرض مجاني أو بلا فئات", () => {
+    assert.equal(lowestPriceCents([]), 0)
+    assert.equal(lowestPriceCents([{ priceCents: 0 }, { priceCents: 0 }]), 0)
+  })
+
+  it("يتجاهل القيم غير الصالحة أو السالبة", () => {
+    assert.equal(lowestPriceCents([{ priceCents: Number.NaN }, { priceCents: 12000 }]), 12000)
+    assert.equal(lowestPriceCents([{ priceCents: -500 }, { priceCents: 9000 }]), 9000)
   })
 })

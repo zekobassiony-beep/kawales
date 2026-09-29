@@ -6,8 +6,7 @@ import {
   updateTicketStatusInDb,
   upsertTicketInDb,
 } from "@/lib/supabase/tickets"
-import { uploadTicketImageToStorage } from "@/lib/supabase/storage"
-import { buildTicketQrPng } from "@/lib/telegram-ticket-image"
+import { ticketQrImagePath } from "@/lib/ticket-code"
 
 /**
  * سجل التذاكر على الخادم — الآن مبني على جدول `tickets` في **Supabase** (Postgres).
@@ -169,25 +168,24 @@ export async function getTicketRecord(id: string): Promise<ServerTicketRecord | 
 /* ---------- توليد صورة التذكرة (من بوت تليجرام) وحفظها لعرض الموقع ---------- */
 
 /**
- * يولّد صورة التذكرة/QR (نفس صورة البوت) ويرفعها إلى Supabase Storage، ثم
- * يحفظ رابطها العام على التذكرة (`ticket_image_url`) ليعرضه الموقع كـ Viewer.
- * يعيد الرابط عند النجاح، أو null مع تسجيل صريح للسبب.
+ * يجهّز صورة التذكرة/QR ليعرضها الموقع، ويعيد الرابط (أو null عند فشل الحفظ).
+ *
+ * ⚠️ **لم نعد نرفع الصورة إلى تخزين سحابي**: عند ٢٥٦٠٠ تذكرة كان الرفع يستهلك
+ * ≈١.٥ جيجابايت (خارج الحصة المجانية) + توليد ٢٥٦٠٠ صورة على معالج الاستضافة
+ * دفعة واحدة. الآن نحفظ رابط **مُصدِّر يولّد نفس الصورة عند الطلب**
+ * (`/api/tickets/<id>/qr.png`) بدقة أعلى، ويُخزَّن مؤقتًا في حواف الشبكة.
  */
-export async function publishTicketImage(ticketId: string, qrPayload: string): Promise<string | null> {
+export async function publishTicketImage(ticketId: string, _qrPayload?: string): Promise<string | null> {
   const id = normalize(ticketId)
-  console.log(`[tickets] توليد صورة التذكرة ${id}…`)
-  const png = buildTicketQrPng(qrPayload, 12)
-  const upload = await uploadTicketImageToStorage(id, png)
-  if (!upload.ok) {
-    console.error(`[tickets] تعذّر رفع صورة التذكرة ${id} إلى Storage: ${upload.error}`)
-    return null
-  }
-  const saved = await setTicketImageUrlInDb(id, upload.publicUrl)
+  const url = ticketQrImagePath(id)
+
+  const saved = await setTicketImageUrlInDb(id, url)
   if (!saved) {
     console.warn(`[tickets] لم يُحفظ ticket_image_url للتذكرة ${id} (هل شُغّل scripts/tickets-telegram.sql؟)`)
+    return null
   }
-  console.log(`[tickets] صورة التذكرة ${id} جاهزة: ${upload.publicUrl}`)
-  return upload.publicUrl
+  console.log(`[tickets] رابط صورة التذكرة ${id} جاهز: ${url}`)
+  return url
 }
 
 /* ---------- ربط شات تليجرام العميل بالتذكرة (لإرسال QR عند القبول) ---------- */

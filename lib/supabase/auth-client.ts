@@ -3,6 +3,9 @@
 import { createBrowserClient } from "@supabase/ssr"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config"
+import { createAccountWithPassword } from "@/app/actions/auth"
+import { isAccountRole } from "@/lib/roles"
+import { arabicAuthError } from "@/lib/auth-errors"
 
 /**
  * Supabase Auth على المتصفح (Google OAuth + Email OTP).
@@ -34,7 +37,75 @@ export function authCallbackUrl(next?: string, role?: string): string {
   return `${origin}/auth/callback${query ? `?${query}` : ""}`
 }
 
-export type AuthActionResult = { ok: boolean; error?: string }
+export type AuthActionResult = {
+  ok: boolean
+  error?: string
+  /** يحتاج المستخدم لتسجيل الدخول بدل الإنشاء (البريد مسجّل بحساب فعّال). */
+  needsSignIn?: boolean
+  /** مزوّد الحساب المسجَّل بالبريد: google ⇒ أنشأه صاحبه بحساب جوجل (بلا كلمة مرور). */
+  provider?: "google" | "password"
+  /** (توافق خلفي) لم يبقَ مسار تأكيد بالبريد — القيمة دائمًا false. */
+  needsEmailConfirmation?: boolean
+}
+
+/** (يُعاد تصديره للتوافق) ترجمة رسائل أخطاء المصادقة إلى العربية. */
+export { arabicAuthError }
+
+/**
+ * إنشاء حساب جديد ببريد وكلمة مرور — **تأكيد فوري بلا بريد إلكتروني**.
+ *
+ * يُنشأ الحساب على السيرفر بمفتاح الخدمة (`app/actions/auth.ts`) فيكون مؤكَّدًا
+ * مباشرة، ثم تُفتح الجلسة هنا بكلمة المرور نفسها — فلا حاجة لرابط تأكيد قد لا يصل.
+ * إن كان البريد مسجّلًا بحساب فعّال ⇒ `needsSignIn` مع رسالة توجّهه إلى تسجيل الدخول.
+ */
+export async function signUpWithPassword(
+  email: string,
+  password: string,
+  input: { next?: string; role?: string } = {},
+): Promise<AuthActionResult> {
+  const supabase = getSupabaseAuthClient()
+  if (!supabase) return { ok: false, error: "المصادقة غير مهيأة على هذا المشروع (تحقق من متغيّرات البيئة)." }
+
+  const normalized = email.trim().toLowerCase()
+
+  // المسار الأساسي: إنشاء الحساب على السيرفر بمفتاح الخدمة (تأكيد فوري — بلا
+  // انتظار بريد تأكيد لا يصل)، ثم فتح الجلسة من المتصفح بكلمة المرور نفسها.
+  const created = await createAccountWithPassword({
+    email: normalized,
+    password,
+    role: isAccountRole(input.role) ? input.role : undefined,
+  })
+  if (!created.ok) {
+    return { ok: false, error: created.error, needsSignIn: created.needsSignIn, provider: created.provider }
+  }
+
+  const signed = await signInWithPassword(normalized, password)
+  if (!signed.ok) {
+    return {
+      ok: false,
+      needsSignIn: true,
+      error: "أُنشئ الحساب بنجاح لكن تعذّر فتح الجلسة — اضغط «تسجيل الدخول» بنفس كلمة المرور.",
+    }
+  }
+  return { ok: true }
+}
+
+/** تسجيل الدخول ببريد وكلمة مرور (مصادقة حقيقية — كلمة مرور خاطئة = رفض). */
+export async function signInWithPassword(email: string, password: string): Promise<AuthActionResult> {
+  const supabase = getSupabaseAuthClient()
+  if (!supabase) return { ok: false, error: "المصادقة غير مهيأة على هذا المشروع (تحقق من متغيّرات البيئة)." }
+
+  const normalized = email.trim().toLowerCase()
+  const { data, error } = await supabase.auth.signInWithPassword({ email: normalized, password })
+  if (error) return { ok: false, error: arabicAuthError(error.message) }
+  if (!data.session) return { ok: false, error: "لم تُفتح الجلسة — أعد المحاولة." }
+  return { ok: true }
+}
+
+/** هل المصادقة الحقيقية متاحة على هذا المشروع؟ */
+export function isAuthConfigured(): boolean {
+  return isSupabaseConfigured()
+}
 
 /** تسجيل الدخول عبر Google (يفتح شاشة اختيار الحساب ثم يعود إلى /auth/callback). */
 export async function signInWithGoogle(input: { next?: string; role?: string } = {}): Promise<AuthActionResult> {

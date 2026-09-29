@@ -5,6 +5,7 @@
 // Usage: npm run test:e2e   (which builds first, then runs this file)
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import pg from "pg"
@@ -229,7 +230,42 @@ try {
     else fail(`GET ${asset} returned ${response.status}`)
   }
 
-  // 9. Operator dashboards are gated: an anonymous visitor is redirected to /login
+  // 9. صفحة الدخول: واجهة حقيقية (تسجيل دخول + إنشاء حساب، بلا كود تحقق بالبريد)
+  const login = await get("/login")
+  const loginBody = readable(login.body)
+  if (login.status !== 200) {
+    fail(`GET /login returned ${login.status}`)
+  } else if (!loginBody.includes("اختر شخصيتك") || !loginBody.includes("إنشاء حساب")) {
+    fail("GET /login did not render the role gate with the sign-up entry")
+  } else if (loginBody.includes("كود التحقق عبر البريد")) {
+    fail("GET /login still renders the removed email verification code panel")
+  } else {
+    pass("GET /login renders the real auth gate (sign in + create account, no email code)")
+  }
+
+  // 10. أداة التأشير للتطوير فقط: مسارها معطّل في النشر ولا تظهر في الصفحات
+  const inspectRoute = await get("/api/dev/inspect")
+  if (inspectRoute.status === 404) pass("GET /api/dev/inspect is disabled in production")
+  else fail(`GET /api/dev/inspect returned ${inspectRoute.status} (expected 404 in production)`)
+
+  const productionHome = await get("/")
+  if (!productionHome.body.includes("وضع التأشير")) pass("the dev inspector badge is absent from the production page")
+  else fail("the dev inspector badge leaked into the production page")
+
+  // 11. لقطات الشاشة ومجلدها موجودان لتوثيق الملاحظات البصرية
+  if (existsSync(path.join(root, ".shots"))) pass("the .shots folder exists for screenshots")
+  else warn("the .shots folder is missing (run the point-and-edit installer)")
+
+  // 11-ب. مُصدِّر صورة التذكرة على السيرفر: يرفض الكود غير الصالح، ويُبلّغ بغياب التذكرة
+  const invalidQr = await get("/api/tickets/ab/qr.png")
+  if (invalidQr.status === 400) pass("GET /api/tickets/<invalid>/qr.png rejects an invalid code")
+  else fail(`an invalid ticket code returned ${invalidQr.status} (expected 400)`)
+
+  const missingQr = await get("/api/tickets/KW-ZZQR0001/qr.png")
+  if (missingQr.status === 404) pass("GET /api/tickets/<missing>/qr.png returns 404 for an unknown ticket")
+  else fail(`an unknown ticket returned ${missingQr.status} (expected 404)`)
+
+  // 12. Operator dashboards are gated: an anonymous visitor is redirected to /login
   for (const path of ["/admin", "/producer", "/gatekeeper"]) {
     const response = await fetch(baseUrl + path, { redirect: "manual" })
     const location = response.headers.get("location") ?? ""

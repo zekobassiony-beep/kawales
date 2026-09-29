@@ -195,7 +195,7 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
               ? "تذكرة تليجرام الرسمية — اعرضها عند بوابة المسرح"
               : "رمز الدخول جاهز — تُصدر صورة التذكرة من تليجرام لحظة اعتماد الإيصال"}
           </p>
-          <TicketQrViewer ticket={ticket} size={200} />
+          <TicketQrViewer ticket={ticket} size={280} />
           <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
@@ -240,19 +240,16 @@ function TicketDetails({ ticket }: { ticket: LocalTicket }) {
         </ul>
         <div className="flex flex-col items-center gap-1">
           {admitted ? (
-            <>
-              <span onClick={() => setQrOpen(true)} title="اضغط لعرض التذكرة كاملة">
-                <TicketQrViewer ticket={ticket} size={104} />
-              </span>
-              <button
-                type="button"
-                onClick={() => setQrOpen(true)}
-                className="inline-flex items-center gap-1 text-[10px] text-primary transition-colors hover:underline"
-              >
-                <QrCodeIcon className="h-3 w-3" />
-                عرض / تنزيل الرمز
-              </button>
-            </>
+            // التذكرة (الصورة/رمز الدخول) تُعرض مرة واحدة في البلوك الكبير أعلاه،
+            // وهنا يبقى زر الوصول فقط — لا تكرار للصورة.
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-3 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              <QrCodeIcon className="h-3 w-3" />
+              عرض / تنزيل التذكرة
+            </button>
           ) : (
             <div className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border/60 text-center text-[10px] text-muted-foreground">
               <Clock className="h-4 w-4" />

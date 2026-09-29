@@ -4,6 +4,8 @@ import { useState } from "react"
 import { Armchair, Check, Clock, Copy, Minus, Plus, Ticket as TicketIcon, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, rowLabel, tierForRow } from "@/lib/format"
+import { couponPriceShape, type CouponLike } from "@/lib/coupon-pricing"
+import { CouponPrice } from "@/components/coupon-price"
 import { formatBytes, prepareReceiptImage } from "@/lib/image-compress"
 import { MAX_SEATS_PER_BOOKING, hexToRgba } from "@/lib/seats"
 import type { EventWithRelations } from "@/lib/queries"
@@ -33,12 +35,15 @@ export function NumberedSeats({
   selected,
   onToggle,
   bookedSeatIds = [],
+  coupon = null,
 }: {
   event: EventWithRelations
   selected: string[]
   onToggle: (seatId: string) => void
   /** مقاعد محجوزة مسبقًا (تُعرض كـ «مباع» وغير قابلة للاختيار). */
   bookedSeatIds?: string[]
+  /** كوبون مطبَّق (اختياري) — فيظهر «شكل الخصم» على أسعار دليل الفئات. */
+  coupon?: CouponLike | null
 }) {
   const tiers = event.priceTiers
   const booked = new Set(bookedSeatIds)
@@ -55,7 +60,11 @@ export function NumberedSeats({
           <span key={tier.id} className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-[11px]">
             <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: tier.color }} />
             <span className="font-medium">{tier.name}</span>
-            <span className="text-muted-foreground">{formatPrice(tier.priceCents)}</span>
+            {coupon ? (
+              <CouponPrice shape={couponPriceShape([tier.priceCents], coupon)} size="sm" />
+            ) : (
+              <span className="text-muted-foreground">{formatPrice(tier.priceCents)}</span>
+            )}
           </span>
         ))}
         {tiers.length === 0 && <span className="text-[11px] text-muted-foreground">لا فئات أسعار متاحة.</span>}

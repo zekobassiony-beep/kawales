@@ -4,7 +4,7 @@ import { CalendarDays, Languages, MapPin, Star, Users } from "lucide-react"
 import { getEventBySlug, getEvents, getSoldSeatCounts, getBookedSeatIds } from "@/lib/queries"
 import { formatDate, formatDuration, formatTime } from "@/lib/format"
 import { bookingBlockedReason } from "@/lib/booking-rules"
-import { ageRatingFor, buildShowtimeCards, mapsUrlFor } from "@/lib/show-detail"
+import { ageRatingFor, buildShowtimeCards, lowestPriceCents, mapsUrlFor } from "@/lib/show-detail"
 import { ShowTabs, ShowCastPanel } from "@/app/shows/[slug]/show-tabs"
 import { ShowRatingStats, ShowReviewsPanel } from "@/app/shows/[slug]/show-reviews-panel"
 import { ShowTrailerButton } from "@/app/shows/[slug]/show-trailer-button"
@@ -35,7 +35,7 @@ export default async function ShowDetailPage({ params }: { params: Promise<{ slu
   const capacity = Math.max(1, event.venue.rows * event.venue.seatsPerRow)
   const sold = soldCounts.get(event.id) ?? 0
   const bookedSeatIds = await getBookedSeatIds(event.id)
-  const minPrice = Math.min(...event.priceTiers.map((tier) => tier.priceCents), 0)
+  const minPrice = lowestPriceCents(event.priceTiers)
   const blocked = bookingBlockedReason(event)
   const ageRating = ageRatingFor({ category: event.category, durationMinutes: event.durationMinutes })
   const mapsUrl = mapsUrlFor(event.venue)

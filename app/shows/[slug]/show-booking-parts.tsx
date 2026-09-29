@@ -3,7 +3,9 @@
 import { Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
+import type { CouponPriceShape } from "@/lib/coupon-pricing"
 import { metalForTier, type BookingTierLike } from "@/lib/show-detail"
+import { CouponPrice } from "@/components/coupon-price"
 
 /** أجزاء صندوق الحجز: كارت الفئة المعدني · صف الكمية. */
 
@@ -16,12 +18,15 @@ export function TierOption({
   active,
   remaining,
   onSelect,
+  priceShape,
 }: {
   tier: BookingTierLike
   index: number
   active: boolean
   remaining: number
   onSelect: () => void
+  /** شكل السعر بعد كوبون (اختياري) — لعرض السعر الأصلي مشطوبًا والجديد بجانبه. */
+  priceShape?: CouponPriceShape
 }) {
   const metal = metalForTier(tier.name, index)
   return (
@@ -43,7 +48,11 @@ export function TierOption({
           <span className="mt-0.5 block text-[11px] text-zinc-500">{remaining} تذكرة متبقية</span>
         </span>
       </span>
-      <span className="shrink-0 font-serif text-sm font-bold text-amber-400">{formatPrice(tier.priceCents)}</span>
+      {priceShape && priceShape.hasDiscount ? (
+        <CouponPrice shape={priceShape} size="md" className="shrink-0 justify-end" />
+      ) : (
+        <span className="shrink-0 font-serif text-sm font-bold text-amber-400">{formatPrice(tier.priceCents)}</span>
+      )}
     </button>
   )
 }

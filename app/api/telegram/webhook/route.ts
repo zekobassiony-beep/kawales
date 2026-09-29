@@ -280,12 +280,13 @@ export async function POST(req: NextRequest) {
         }
 
         if (publishTicket) {
-          // (أ) التليجرام مولّد التذكرة: نولّد صورة QR ونخزّن رابطها ليعرضها الموقع (Viewer).
+          // (أ) نحفظ على التذكرة رابطًا لمُصدِّر يولّد صورة QR عند الطلب
+          //     (`/api/tickets/<id>/qr.png`) — بلا تخزين سحابي وبلا توليد جماعي.
           const published = await publishTicketImage(parsed.ticketId, decision.record.qrPayload)
           if (!published) {
             console.error(
-              `[telegram] فشل نشر صورة التذكرة ${parsed.ticketId} — تحقق من bucket «tickets» ` +
-                "(node scripts/setup-storage-buckets.mjs) وترحيل الأعمدة (scripts/tickets-telegram.sql).",
+              `[telegram] فشل حفظ رابط صورة التذكرة ${parsed.ticketId} — تحقق من ترحيل الأعمدة ` +
+                "(scripts/tickets-telegram.sql).",
             )
           }
           // (ب) إرسال التذكرة إلى محادثة الإدارة (نفس رمز QR المعروض على الموقع).

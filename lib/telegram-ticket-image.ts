@@ -27,15 +27,33 @@ export async function sendTicketQrImage(input: {
   }
 
   console.log(`[telegram] إرسال صورة التذكرة إلى chat_id=${chatId}…`)
-  const png = buildTicketQrPng(input.qrPayload, 12)
-  const form = new FormData()
-  form.append("chat_id", String(chatId))
-  form.append("caption", input.caption)
-  form.append("parse_mode", "HTML")
-  form.append(
-    "photo",
-    new Blob([new Uint8Array(png)], { type: "image/png" }),
-    `kawalees-qr-${input.qrPayload.slice(-6)}.png`,
+  // دقة 16 بكسل للوحدة ⇒ رمز كبير وحواف نظيفة، ومعه منطقة هدوء قياسية.
+  const png = buildTicketQrPng(input.qrPayload, 16)
+  const fileName = `kawalees-ticket-${input.qrPayload.slice(-6)}.png`
+  const blob = new Blob([new Uint8Array(png)], { type: "image/png" })
+
+  // ⚠️ الإرسال **كمستند** لا كصورة: تليجرام يعيد ضغط الصور فيفسد وحدات الرمز
+  // ويصبح غير قابل للمسح. المستند يُسلَّم كما هو بجودته الأصلية.
+  const asDocument = new FormData()
+  asDocument.append("chat_id", String(chatId))
+  asDocument.append("caption", input.caption)
+  asDocument.append("parse_mode", "HTML")
+  asDocument.append("document", blob, fileName)
+
+  const documentResult = await callTelegramBot(token, "sendDocument", asDocument)
+  if (documentResult.ok) return documentResult
+
+  console.warn(
+    `[telegram] فشل إرسال التذكرة كمستند (${documentResult.error ?? "?"}) — إعادة المحاولة كصورة.`,
   )
-  return callTelegramBot(token, "sendPhoto", form)
+
+  const asPhoto = new FormData()
+  asPhoto.append("chat_id", String(chatId))
+  asPhoto.append("caption", input.caption)
+  asPhoto.append("parse_mode", "HTML")
+  asPhoto.append("photo", blob, fileName)
+
+  const photoResult = await callTelegramBot(token, "sendPhoto", asPhoto)
+  return photoResult.ok ? { ...photoResult, warning: "أُرسلت كصورة (قد يعيد تليجرام ضغطها)" } : photoResult
 }
+

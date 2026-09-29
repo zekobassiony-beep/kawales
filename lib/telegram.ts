@@ -30,6 +30,14 @@ export type BookingNotification = {
   subtotalCents: number
   serviceFeeCents: number
   totalCents: number
+  /** معلومات الكوبون المطبَّق (اختياري) — تُعرض في الإشعار لتوضيح الخصم للإدارة. */
+  coupon?: {
+    code: string
+    /** السعر قبل الكوبون (تذاكر + رسوم). */
+    originalTotalCents: number
+    discountCents: number
+    serviceFeeSavingCents: number
+  }
   receipt?: BookingNotificationReceipt
 }
 
@@ -297,9 +305,22 @@ function buildCaption(booking: BookingNotification): string {
     ),
     "",
     `المجموع الفرعي: ${formatEgp(booking.subtotalCents)}`,
-    `رسوم الخدمة: ${formatEgp(booking.serviceFeeCents)}`,
+    `رسوم الخدمة: ${booking.serviceFeeCents === 0 && booking.coupon ? "مجانًا (كوبون) 🎟️" : formatEgp(booking.serviceFeeCents)}`,
     `💰 <b>الإجمالي: ${formatEgp(booking.totalCents)}</b>`,
   ]
+
+  if (booking.coupon) {
+    lines.push(
+      "",
+      `🎟️ <b>كوبون مطبَّق:</b> <code>${escapeHtml(booking.coupon.code)}</code>`,
+      `السعر قبل الكوبون: ${formatEgp(booking.coupon.originalTotalCents)}`,
+      `خصم الكوبون: −${formatEgp(booking.coupon.discountCents)}`,
+    )
+    if (booking.coupon.serviceFeeSavingCents > 0) {
+      lines.push(`إعفاء رسوم الخدمة: −${formatEgp(booking.coupon.serviceFeeSavingCents)} (مجانًا)`)
+    }
+  }
+
   if (booking.receipt) {
     lines.push("", `🧾 إيصال مرفق: ${escapeHtml(booking.receipt.filename)}`)
   }

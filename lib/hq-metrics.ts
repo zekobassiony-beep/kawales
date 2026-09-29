@@ -11,6 +11,8 @@ export type HQEventInput = {
   city: string
   venueName: string
   venueCapacity: number
+  /** عدد المقاعد المباعة فعليًا لهذا العرض (من جدول الحجوزات — مصدر الحقيقة). */
+  soldSeats: number
   minPriceCents: number
 }
 
@@ -30,7 +32,15 @@ export type HQOpsInput = {
 }
 
 export type HQPoint = { label: string; value: number }
-export type HQOccupancyPoint = { label: string; sold: number; capacity: number }
+export type HQOccupancyPoint = {
+  label: string
+  sold: number
+  capacity: number
+  /** المقاعد المتبقية فعليًا (السعة − المباع). */
+  remaining: number
+  /** نسبة الإشغال (%). */
+  pct: number
+}
 
 export type HQMetrics = {
   /** إجمالي الإيرادات المعتمدة (بالقروش) من التذاكر المقبولة/الحضور. */
@@ -56,6 +66,14 @@ export type HQMetrics = {
   topShows: HQPoint[]
   /** نسب إشغال المسارح (أعلى ٤). */
   occupancy: HQOccupancyPoint[]
+  /** إجمالي سعة كل العروض (مجموع سعة كل عرض على حدة). */
+  capacityTotal: number
+  /** إجمالي المقاعد المباعة عبر كل العروض. */
+  soldTotal: number
+  /** إجمالي المقاعد المتبقية عبر كل العروض. */
+  seatsRemaining: number
+  /** نسبة الإشغال الكلية (%). */
+  occupancyPct: number
 }
 
 const MONTH_LABELS = [
@@ -178,19 +196,35 @@ export function computeHqMetrics(input: {
     soldByVenue.set(venueName, (soldByVenue.get(venueName) ?? 0) + Math.max(1, ticket.seats.length))
   }
 
-  // نسب إشغال المسارح: المقاعد المباعة / سعة المسرح.
+  // إشغال المسارح: يُحسب من **المقاعد المباعة الحقيقية** لكل عرض (مصدر الحقيقة في
+  // جدول الحجوزات)، مع الاستعانة بعدد مقاعد التذاكر كحد أدنى احتياطي عند غياب البيانات.
+  const capacityTotal = input.events.reduce((sum, event) => sum + Math.max(1, event.venueCapacity), 0)
+  const soldTotal = input.events.reduce(
+    (sum, event) => sum + Math.max(0, Math.min(event.soldSeats ?? 0, Math.max(1, event.venueCapacity))),
+    0,
+  )
+  const seatsRemaining = Math.max(0, capacityTotal - soldTotal)
+  const occupancyPct = capacityTotal > 0 ? Math.round((soldTotal / capacityTotal) * 100) : 0
+
   const occupancy: HQOccupancyPoint[] = input.events
     .reduce<HQOccupancyPoint[]>((list, event) => {
       if (!list.some((item) => item.label === event.venueName)) {
+        const capacity = Math.max(1, event.venueCapacity)
+        // المباع الحقيقي لهذا العرض، وإن كان صفرًا نستعين بمقاعد التذاكر لنفس المسرح.
+        const soldFromEvents = Math.max(0, Math.min(event.soldSeats ?? 0, capacity))
+        const soldFromTickets = soldByVenue.get(event.venueName) ?? 0
+        const sold = Math.max(soldFromEvents, soldFromTickets)
         list.push({
           label: event.venueName,
-          sold: soldByVenue.get(event.venueName) ?? 0,
-          capacity: Math.max(1, event.venueCapacity),
+          sold,
+          capacity,
+          remaining: Math.max(0, capacity - sold),
+          pct: Math.round((Math.min(sold, capacity) / capacity) * 100),
         })
       }
       return list
     }, [])
-    .sort((a, b) => b.sold / b.capacity - a.sold / a.capacity)
+    .sort((a, b) => b.pct - a.pct || b.sold - a.sold)
     .slice(0, 4)
 
   const venueNames = new Set(input.events.map((event) => event.venueName).filter(Boolean))
@@ -216,6 +250,10 @@ export function computeHqMetrics(input: {
     revenueByCity: topEntries(cityTotals, 5),
     topShows: topEntries(showTotals, 5),
     occupancy,
+    capacityTotal,
+    soldTotal,
+    seatsRemaining,
+    occupancyPct,
   }
 }
 

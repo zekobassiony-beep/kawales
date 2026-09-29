@@ -1,6 +1,6 @@
-import { cookies } from "next/headers"
 import { getSupabaseAdmin } from "@/lib/supabase/server"
-import { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL, SESSION_EMAIL_COOKIE } from "@/lib/auth-constants"
+import { getSupabaseUser } from "@/lib/supabase/session-server"
+import { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL } from "@/lib/auth-constants"
 
 /**
  * حماية ودخول السوبر أدمن — إدارة المسؤولين عبر جدول `admin_users` في Supabase.
@@ -11,7 +11,7 @@ import { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL, SESSION_EMAIL_COOKIE } from "@/l
  * ملف سيرفر فقط (يستعمل `next/headers` ومفتاح الخدمة).
  */
 
-export { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL, SESSION_EMAIL_COOKIE }
+export { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL }
 
 /** رسالة توضيحية عند غياب جدول `admin_users`. */
 export const ADMIN_TABLE_MISSING_MESSAGE =
@@ -27,10 +27,16 @@ export function isMasterAdmin(email?: string | null): boolean {
   return normalizeEmail(email) === MASTER_ADMIN_EMAIL
 }
 
-/** يقرأ بريد الجلسة من الكوكي (انعكاس للجلسة المحلية) — للسيرفر فقط. */
+/**
+ * بريد الجلسة الحالية من جلسة Supabase الرسمية (كوكيز الجلسة المُوقَّعة) — للسيرفر فقط.
+ *
+ * ملاحظة أمنية: كان هذا يقرأ كوكي `kawalees:email` الذي يكتبه المتصفح، وكان أي
+ * زائر يستطيع كتابته ببريد الأدمن فيدخل اللوحة بلا كلمة مرور. أُزيل هذا المسار
+ * بالكامل والاعتماد الآن على `supabase.auth.getUser()` فقط.
+ */
 export async function getSessionEmail(): Promise<string> {
-  const store = await cookies()
-  return normalizeEmail(store.get(SESSION_EMAIL_COOKIE)?.value)
+  const user = await getSupabaseUser()
+  return normalizeEmail(user?.email)
 }
 
 export type AdminListResult = {

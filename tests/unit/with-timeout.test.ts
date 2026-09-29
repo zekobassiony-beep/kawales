@@ -9,9 +9,10 @@ describe("withTimeout", () => {
   })
 
   it("يرمي TimeoutError عند تجاوز المهلة", async () => {
-    const slow = new Promise((resolve) => setTimeout(resolve, 50))
+    // وعد لا يُحلّ أبدًا ⇒ الاختبار حتمي ولا يتأثر بحمل تشغيل بقية الاختبارات.
+    const never = new Promise<void>(() => undefined)
     await assert.rejects(
-      () => withTimeout(slow, 10, "test.slow"),
+      () => withTimeout(never, 5, "test.slow"),
       (error: unknown) => {
         assert.ok(error instanceof TimeoutError)
         assert.match(error.message, /test\.slow/)
@@ -30,8 +31,8 @@ describe("withTimeout", () => {
 
 describe("withTimeoutFallback", () => {
   it("يعيد البديل عند انتهاء المهلة بدل إسقاط الطلب", async () => {
-    const slow = new Promise<string>((resolve) => setTimeout(() => resolve("late"), 50))
-    assert.equal(await withTimeoutFallback(slow, 10, "storage.slow", "fallback"), "fallback")
+    const never = new Promise<string>(() => undefined)
+    assert.equal(await withTimeoutFallback(never, 5, "storage.slow", "fallback"), "fallback")
   })
 
   it("يعيد القيمة الحقيقية عند النجاح", async () => {

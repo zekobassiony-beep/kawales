@@ -2,7 +2,8 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { CalendarDays, CheckCircle2, Clock, Info, MapPin } from "lucide-react"
 import { getBookingByReference, getEventById } from "@/lib/queries"
-import { formatDate, formatPrice, formatTime } from "@/lib/format"
+import { formatDate, formatPrice, formatPriceLabel, formatTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { calculateTotals } from "@/lib/pricing"
 import { googleCalendarUrl } from "@/lib/calendar"
 import { PrintButton } from "@/components/print-button"
@@ -30,6 +31,16 @@ export default async function BookingConfirmationPage({
   const seats = Array.isArray(booking.seats) ? booking.seats : []
   const totals = calculateTotals(seats.map((seat) => seat.priceCents))
   const tierById = new Map((event?.priceTiers ?? []).map((tier) => [tier.id, tier]))
+  /**
+   * أسعار المقاعد تُخزَّن **بعد** خصم الكوبون، و`originalPriceCents` (إن وُجد)
+   * يحمل السعر الأصلي — فنستنتج منه «شكل الخصم» ورسوم الخدمة الفعلية المدفوعة.
+   */
+  const originalSubtotalCents = seats.reduce(
+    (sum, seat) => sum + (seat.originalPriceCents ?? seat.priceCents),
+    0,
+  )
+  const couponDiscountCents = Math.max(0, originalSubtotalCents - totals.subtotalCents)
+  const paidServiceFeeCents = Math.max(0, booking.totalCents - totals.subtotalCents)
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
@@ -89,7 +100,18 @@ export default async function BookingConfirmationPage({
                           {tier?.name ?? seat.tierId}
                         </span>
                       </span>
-                      <span className="font-medium">{formatPrice(seat.priceCents)}</span>
+                      <span className="inline-flex items-center gap-2">
+                        {typeof seat.originalPriceCents === "number" && seat.originalPriceCents > seat.priceCents ? (
+                          <>
+                            <span className="text-xs text-muted-foreground line-through">
+                              {formatPrice(seat.originalPriceCents)}
+                            </span>
+                            <span className="font-medium text-emerald-300">{formatPriceLabel(seat.priceCents)}</span>
+                          </>
+                        ) : (
+                          <span className="font-medium">{formatPriceLabel(seat.priceCents)}</span>
+                        )}
+                      </span>
                     </li>
                   )
                 })}
@@ -99,15 +121,53 @@ export default async function BookingConfirmationPage({
             <div className="mt-6 space-y-2 border-t border-border/60 pt-5 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">المجموع الفرعي</span>
-                <span className="font-medium">{formatPrice(totals.subtotalCents)}</span>
+                {couponDiscountCents > 0 ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground line-through">
+                      {formatPrice(originalSubtotalCents)}
+                    </span>
+                    <span className="font-medium">{formatPrice(totals.subtotalCents)}</span>
+                  </span>
+                ) : (
+                  <span className="font-medium">{formatPrice(totals.subtotalCents)}</span>
+                )}
               </div>
+              {couponDiscountCents > 0 && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-emerald-300">خصم الكوبون</span>
+                  <span className="font-medium text-emerald-300">−{formatPrice(couponDiscountCents)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">رسوم الخدمة</span>
-                <span className="font-medium">{formatPrice(totals.serviceFeeCents)}</span>
+                <span
+                  className={cn(
+                    "font-medium",
+                    paidServiceFeeCents === 0 && couponDiscountCents > 0 ? "text-emerald-300" : undefined,
+                  )}
+                >
+                  {paidServiceFeeCents === 0 && totals.serviceFeeCents > 0 && couponDiscountCents > 0 ? (
+                    <>
+                      <span className="me-2 text-xs text-muted-foreground line-through">
+                        {formatPrice(totals.serviceFeeCents)}
+                      </span>
+                      مجانًا
+                    </>
+                  ) : (
+                    formatPriceLabel(paidServiceFeeCents)
+                  )}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-2">
                 <span className="font-medium">الإجمالي المدفوع</span>
-                <span className="text-lg font-semibold">{formatPrice(booking.totalCents)}</span>
+                <span
+                  className={cn(
+                    "text-lg font-semibold",
+                    booking.totalCents === 0 ? "text-emerald-400" : undefined,
+                  )}
+                >
+                  {formatPriceLabel(booking.totalCents)}
+                </span>
               </div>
             </div>
           </div>

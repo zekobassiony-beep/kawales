@@ -21,6 +21,7 @@ function event(overrides: Partial<HQEventInput> = {}): HQEventInput {
     city: "القاهرة",
     venueName: "مسرح الأندلس",
     venueCapacity: 100,
+    soldSeats: 0,
     minPriceCents: 15000,
     ...overrides,
   }
@@ -130,6 +131,60 @@ describe("مقاييس لوحة السوبر أدمن (HQ)", () => {
       now: NOW,
     })
     assert.equal(rich.trendIsDemo, false)
+  })
+
+  it("يحسب المقاعد المباعة والمتبقية من البيانات الحقيقية لكل عرض", () => {
+    const metrics = computeHqMetrics({
+      events: [
+        event({ id: 1, venueCapacity: 100, soldSeats: 30 }),
+        event({ id: 2, venueName: "مسرح الطليعة", venueCapacity: 50, soldSeats: 20 }),
+      ],
+      tickets: [],
+      ops: { joinRequests: [], payouts: [], alerts: [] },
+      now: NOW,
+    })
+    assert.equal(metrics.capacityTotal, 150)
+    assert.equal(metrics.soldTotal, 50)
+    assert.equal(metrics.seatsRemaining, 100)
+    assert.equal(metrics.occupancyPct, 33)
+  })
+
+  it("لا يُظهر إشغالًا صفريًا عندما لا تحمل التذكرة اسم المكان (سبب العطل السابق)", () => {
+    const metrics = computeHqMetrics({
+      events: [event({ venueName: "مسرح الأندلس", venueCapacity: 100, soldSeats: 40 })],
+      // تذكرة قادمة من قاعدة البيانات بلا اسم مكان — كانت تُصفّر إشغال المسرح كله.
+      tickets: [ticket({ venue: "", showTitle: "", seats: ["A1"] })],
+      ops: { joinRequests: [], payouts: [], alerts: [] },
+      now: NOW,
+    })
+    const venue = metrics.occupancy[0]
+    assert.equal(venue?.sold, 40)
+    assert.equal(venue?.remaining, 60)
+    assert.equal(venue?.pct, 40)
+  })
+
+  it("يحدّ المباع بسعة العرض (لا نسبة أكبر من ١٠٠٪)", () => {
+    const metrics = computeHqMetrics({
+      events: [event({ venueCapacity: 10, soldSeats: 99 })],
+      tickets: [],
+      ops: { joinRequests: [], payouts: [], alerts: [] },
+      now: NOW,
+    })
+    assert.equal(metrics.soldTotal, 10)
+    assert.equal(metrics.seatsRemaining, 0)
+    assert.equal(metrics.occupancyPct, 100)
+    assert.equal(metrics.occupancy[0]?.pct, 100)
+  })
+
+  it("يستخدم مقاعد التذاكر كحد أدنى احتياطي لمسرح بلا بيانات حجوزات", () => {
+    const metrics = computeHqMetrics({
+      events: [event({ venueName: "مسرح الأندلس", venueCapacity: 100, soldSeats: 0 })],
+      tickets: [ticket({ venue: "مسرح الأندلس، القاهرة", seats: ["A1", "A2", "A3"] })],
+      ops: { joinRequests: [], payouts: [], alerts: [] },
+      now: NOW,
+    })
+    assert.equal(metrics.occupancy[0]?.sold, 3)
+    assert.equal(metrics.occupancy[0]?.remaining, 97)
   })
 })
 

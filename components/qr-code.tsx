@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
  */
 export function QrCode({
   payload,
-  size = 180,
+  size = 240,
   className,
   onClick,
   title,
@@ -58,7 +58,7 @@ export function QrCode({
                 y={rowIndex + QR_QUIET_ZONE}
                 width={1}
                 height={1}
-                fill="#0b1020"
+                fill="#000000"
               />
             ) : null,
           ),

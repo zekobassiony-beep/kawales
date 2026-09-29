@@ -1,16 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { useRouter } from "next/navigation"
-import { Check, Drama, Loader2, Lock, LogOut, Mail, ShieldCheck, Sparkles, X } from "lucide-react"
+import { Check, Drama, LogOut, ShieldCheck, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ONBOARDING_PATH, ROLE_LABELS, ROLE_META, ROLE_ORDER, type AccountRole } from "@/lib/roles"
-import { dashboardPathForUser, signIn, signOut, useSession } from "@/lib/session"
-import { ADMIN_DASHBOARD_PATH, isMasterAdminEmail } from "@/lib/auth-constants"
+import { ROLE_LABELS, ROLE_META, ROLE_ORDER, type AccountRole } from "@/lib/roles"
+import { dashboardPathForUser, signOut, useSession } from "@/lib/session"
+import { ADMIN_DASHBOARD_PATH } from "@/lib/auth-constants"
 import { useAdminAccess } from "@/components/use-admin-access"
-import { SupabaseAuthPanel } from "@/app/login/supabase-auth-panel"
+import { AuthModal } from "@/app/login/auth-modal"
+import { LoginNotice } from "@/app/login/login-notice"
 
 /** صور معبّرة عن كل نوع حساب (جمهور/ممثل/فرقة/مسرح) — تُستخدم ككروت وخلفيات ديناميكية. */
 const ROLE_IMAGES: Record<AccountRole, string> = {
@@ -119,6 +119,9 @@ export function RoleGate() {
           </p>
         </header>
 
+        {/* سبب الرجوع للصفحة (فشل الدخول بجوجل أو عدم صلاحية) — كان صامتًا قبل ذلك. */}
+        <LoginNotice />
+
         {user && (
           <div className="mx-auto mt-6 flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/60 px-4 py-3 text-sm">
             <span className="text-muted-foreground">
@@ -168,7 +171,7 @@ export function RoleGate() {
         </div>
 
         <p className="mt-6 text-center text-xs text-foreground/75 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
-          الدخول تجريبي (بريد وكلمة مرور أو Google OAuth تجريبي) والجلسة تُحفظ في متصفحك فقط.
+          أنشئ حسابك ببريدك وكلمة مرور، أو تابع بحساب Google — حسابك يُحفظ على المنصة لتتابع حجوزاتك وتذاكرك.
         </p>
 
         {/* مدخل الأدمن: يظهر دائمًا (بلا كشف أي بيانات) — والحماية الفعلية على السيرفر. */}
@@ -283,198 +286,5 @@ function RoleCard({
         {meta.cta}
       </span>
     </button>
-  )
-}
-
-/** مودال الدخول: بريد وكلمة مرور أو Google OAuth تجريبي، ثم التوجيه لإكمال البيانات. */
-function AuthModal({ role, open, onClose }: { role: AccountRole; open: boolean; onClose: () => void }) {
-  const meta = ROLE_META[role]
-  const router = useRouter()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
-  const [pending, startTransition] = useTransition()
-  const emailRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setError("")
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", onKeyDown)
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    emailRef.current?.focus()
-    return () => {
-      document.removeEventListener("keydown", onKeyDown)
-      document.body.style.overflow = previousOverflow
-    }
-  }, [open, onClose])
-
-  const goToOnboarding = () => startTransition(() => router.push(ONBOARDING_PATH))
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const trimmedEmail = email.trim()
-    if (!trimmedEmail.includes("@") || trimmedEmail.length < 6) {
-      setError("أدخل بريدًا إلكترونيًا صحيحًا.")
-      return
-    }
-    if (password.trim().length < 4) {
-      setError("كلمة المرور يجب أن تكون 4 أحرف على الأقل.")
-      return
-    }
-    setError("")
-    signIn({ email: trimmedEmail, role })
-
-    // بريد السوبر أدمن: يفتح لوحة الإدارة مباشرة بدل خطوات إكمال بيانات الفئة.
-    if (isMasterAdminEmail(trimmedEmail)) {
-      startTransition(() => {
-        router.push(ADMIN_DASHBOARD_PATH)
-        // تحديث كامل ليقرأ الوسيط كوكي الجلسة الجديد ويسمح بالمرور.
-        router.refresh()
-      })
-      return
-    }
-
-    goToOnboarding()
-  }
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`الدخول — ${ROLE_LABELS[role]}`}
-      className={cn(
-        "fixed inset-0 z-[70] transition-all duration-300",
-        open ? "visible opacity-100" : "invisible opacity-0",
-      )}
-    >
-      <button
-        type="button"
-        aria-label="إغلاق"
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-black/70 backdrop-blur-sm"
-      />
-
-      <div
-        className="absolute left-1/2 top-1/2 w-[min(92vw,440px)] overflow-hidden rounded-2xl border bg-card transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-        style={{
-          borderColor: `${meta.accent}59`,
-          boxShadow: `0 40px 90px -40px ${meta.accent}b3`,
-          transform: open ? "translate(-50%,-50%) scale(1)" : "translate(-50%,-50%) scale(0.94)",
-        }}
-      >
-        <div
-          className="flex items-start justify-between gap-3 border-b border-border/60 px-5 py-4"
-          style={{ backgroundImage: `radial-gradient(120% 120% at 100% 0%, ${meta.accent}26, transparent 70%)` }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">{meta.emoji}</span>
-            <span>
-              <span className="block text-[11px] uppercase tracking-[0.2em]" style={{ color: meta.accent }}>
-                {meta.code}
-              </span>
-              <span className="block font-serif text-lg font-semibold">{ROLE_LABELS[role]}</span>
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="إغلاق"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
-          <div>
-            <label htmlFor="gate-email" className="block text-xs text-muted-foreground">
-              البريد الإلكتروني
-            </label>
-            <span className="relative mt-1 block">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                ref={emailRef}
-                id="gate-email"
-                name="email"
-                type="email"
-                dir="ltr"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-left text-sm outline-none transition-colors focus:border-primary"
-              />
-            </span>
-          </div>
-
-          <div>
-            <label htmlFor="gate-password" className="block text-xs text-muted-foreground">
-              كلمة المرور
-            </label>
-            <span className="relative mt-1 block">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                id="gate-password"
-                name="password"
-                type="password"
-                dir="ltr"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-left text-sm outline-none transition-colors focus:border-primary"
-              />
-            </span>
-          </div>
-
-          {error && (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground"
-            >
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={pending}
-            style={{ backgroundColor: meta.accent, color: "#171310" }}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
-            {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-            دخول ومتابعة
-          </button>
-
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span className="h-px flex-1 bg-border/60" />
-            الدخول الرسمي (Supabase Auth)
-            <span className="h-px flex-1 bg-border/60" />
-          </div>
-
-          <SupabaseAuthPanel role={role} accent={meta.accent} />
-
-          <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-            الدخول أعلاه جلسة حقيقية عبر Supabase (Google أو كود البريد). النموذج التجريبي بالأعلى يبقى متاحًا للعرض
-            فقط وبلا كلمة مرور حقيقية.
-          </p>
-
-          <p className="flex flex-wrap items-center justify-center gap-1.5 text-center text-[11px] leading-relaxed text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-amber-300" />
-            للأدمن: ادخل ببريد السوبر أدمن وسيُوجَّهك تلقائيًا إلى
-            <Link
-              href={ADMIN_DASHBOARD_PATH}
-              className="font-semibold text-amber-300 underline decoration-dotted underline-offset-4"
-            >
-              لوحة الإدارة
-            </Link>
-          </p>
-        </form>
-      </div>
-    </div>
   )
 }

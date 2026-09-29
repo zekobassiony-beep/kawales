@@ -19,7 +19,7 @@ const MAX_ATTEMPTS = 24
  */
 export function TicketQrViewer({
   ticket,
-  size = 180,
+  size = 240,
   className,
 }: {
   ticket: Ticket

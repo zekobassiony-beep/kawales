@@ -9,18 +9,18 @@ import {
   isAccountRole,
   type AccountRole,
 } from "@/lib/roles"
-import { SESSION_EMAIL_COOKIE } from "@/lib/auth-constants"
 import { signOutSupabase } from "@/lib/supabase/auth-client"
 import type { User } from "@supabase/supabase-js"
 
 /**
- * جلسة الحساب التجريبية (Mock session).
+ * جلسة المستخدم على الواجهة (مصدرها الحقيقي: Supabase Auth).
  *
- * المشروع لا يملك مصادقة حقيقية بعد (نفس أسلوب `app/dashboard/actions.ts`:
- * محاكاة التفاعل ثم استبداله بالمصدر الحقيقي)، لذلك تُخزَّن الجلسة وبيانات
- * إكمال الملف في `localStorage`. الهيدر يقرأها عبر `useSession()` ليعرض زر
- * الدخول أو الصورة الشخصية وزر الخروج، وصفحة `/onboarding` تكتبها عبر
- * `completeOnboarding()` ثم تُوجّه المستخدم إلى لوحة الفئة المناسبة.
+ * - المصادقة حقيقية عبر Supabase (`lib/supabase/auth-client.ts`) — لا توجد أي
+ *   دالة «دخول وهمي». الجلسة المحلية هنا مجرد انعكاس سريع للواجهة في
+ *   `localStorage`، وتُبنى دائمًا من مستخدم Supabase الرسمي.
+ * - بيانات إكمال الملف تُحفظ **دائمًا في قاعدة البيانات** (جدول `profiles` عبر
+ *   `app/actions/profile.ts`) ثم تُدمج هنا بـ `mergeServerProfile`، فيجد
+ *   المستخدم بياناته بعد تسجيل الدخول من أي جهاز.
  */
 
 /** يُعاد تصدير بيانات الفئات حتى يبقى `@/lib/session` هو مدخل الجلسة الوحيد. */
@@ -167,27 +167,86 @@ export function persistSession(user: SessionUser | null): void {
   } catch {
     // التخزين المحلي قد يكون معطّلًا (تصفح خاص) — نكمل بالذاكرة فقط.
   }
-  // انعكاس بريد الجلسة في كوكي ليتمكن وسيط Next (`middleware.ts`) من حماية
-  // مسارات الأدمن (`/admin` و `/dashboard/admin`) قبل تحميل الصفحة.
-  syncSessionEmailCookie(user?.email ?? null)
+  // ملاحظة أمنية: لم يبقَ أي كوكي بريد مكتوب من المتصفح — حماية مسارات الأدمن
+  // تتم في الوسيط (`middleware.ts`) من جلسة Supabase الرسمية فقط.
   cachedRaw = raw
   cachedUser = user
   window.dispatchEvent(new Event(SESSION_CHANGE_EVENT))
 }
 
-/** يزامن كوكي البريد مع الجلسة (يُحذف عند الخروج). */
-function syncSessionEmailCookie(email: string | null): void {
-  if (typeof document === "undefined") return
-  const maxAge = 60 * 60 * 24 * 30 // 30 يومًا
-  try {
-    if (email && email.trim().length > 0) {
-      document.cookie = `${SESSION_EMAIL_COOKIE}=${encodeURIComponent(email.trim().toLowerCase())}; path=/; max-age=${maxAge}; samesite=lax`
-    } else {
-      document.cookie = `${SESSION_EMAIL_COOKIE}=; path=/; max-age=0; samesite=lax`
+/** كل الحقول النصية في الملف — تُدمج من السيرفر عند غيابها محليًا. */
+const PROFILE_TEXT_KEYS = [
+  "avatarUrl",
+  "fullName",
+  "stageName",
+  "ageGroup",
+  "city",
+  "portfolioUrl",
+  "skills",
+  "troupeName",
+  "directorName",
+  "logoUrl",
+  "vodafoneCash",
+  "instaPay",
+  "bio",
+  "venueName",
+  "inviteCode",
+] as const
+
+/** لقطة ملف المستخدم القادمة من السيرفر (جدول `profiles`). */
+export type ServerProfileSnapshot = {
+  role?: string
+  onboarded?: boolean
+  fullName?: string
+  avatarUrl?: string
+  provider?: string
+  profile?: Partial<SessionProfile>
+}
+
+/**
+ * يدمج الملف المحفوظ في قاعدة البيانات مع الجلسة المحلية.
+ *
+ * - السيرفر هو مصدر الحقيقة لـ «الفئة» و«إكمال البيانات»، فيتوقف تكرار
+ *   `/onboarding` عند كل دخول أو تغيير جهاز.
+ * - القيم النصية من السيرفر تُطبَّق عندما تكون فارغة محليًا فقط، فلا تُفقد
+ *   أي بيانات أدخلها المستخدم للتو في نفس الجلسة.
+ */
+export function mergeServerProfile(snapshot: ServerProfileSnapshot, email?: string): SessionUser | null {
+  const current = readSession()
+  if (!current) return null
+
+  const target = (email ?? current.email).trim().toLowerCase()
+  if (current.email.trim().toLowerCase() !== target) return null
+
+  const role: AccountRole = isAccountRole(snapshot.role) ? snapshot.role : current.role
+  const serverProfile = parseProfile(snapshot.profile ?? {}, "")
+  const profile: SessionProfile = { ...current.profile }
+  const writable = profile as unknown as Record<string, unknown>
+
+  for (const key of PROFILE_TEXT_KEYS) {
+    const value = serverProfile[key]
+    const local = profile[key]
+    if (typeof value === "string" && value.trim().length > 0 && local.trim().length === 0) {
+      writable[key] = value
     }
-  } catch {
-    // الكوكيز معطّلة — لا شيء نفعله.
   }
+  profile.telegramLinked = serverProfile.telegramLinked || current.profile.telegramLinked
+
+  const snapshotName = (snapshot.fullName ?? "").trim()
+  if (snapshotName.length > 0 && profile.fullName.trim().length === 0) profile.fullName = snapshotName
+  const snapshotAvatar = (snapshot.avatarUrl ?? "").trim()
+  if (snapshotAvatar.length > 0 && profile.avatarUrl.trim().length === 0) profile.avatarUrl = snapshotAvatar
+
+  const displayName = displayNameForProfile(role, profile)
+  const user: SessionUser = {
+    ...current,
+    role,
+    onboarded: snapshot.onboarded === true || current.onboarded,
+    profile,
+    name: displayName.length > 0 ? displayName : current.name,
+  }
+  persistSession(user)
+  return user
 }
 
 /** اسم مبدئي قبل إكمال البيانات: بادئة البريد أو اسم الفئة. */
@@ -208,27 +267,9 @@ export function displayNameForProfile(role: AccountRole, profile: SessionProfile
 }
 
 /**
- * الخطوة الأولى: دخول الفئة المختارة (بريد/كلمة مرور أو Google التجريبي).
- * الجلسة تُحفظ بـ `onboarded: false` حتى تُكمل بياناتها في `/onboarding`.
+ * ملاحظة: لا توجد دالة «دخول وهمي» — الدخول وإنشاء الحساب يتمّان عبر Supabase Auth
+ * (`lib/supabase/auth-client.ts`) ثم تُطبَّق الجلسة بـ `applySupabaseUser` أدناه.
  */
-export function signIn(input: {
-  email: string
-  role: AccountRole
-  provider?: AuthProvider
-  name?: string
-}): SessionUser {
-  const email = input.email.trim()
-  const user: SessionUser = {
-    name: input.name?.trim() || defaultNameFor(input.role, email),
-    email,
-    role: input.role,
-    provider: input.provider ?? "password",
-    onboarded: false,
-    profile: emptyProfile(),
-  }
-  persistSession(user)
-  return user
-}
 
 /** الخطوة الثانية: حفظ بيانات البروفايل ووسم الحساب كمكتمل. */
 export function completeOnboarding(profile: SessionProfile): SessionUser | null {

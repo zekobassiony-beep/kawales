@@ -50,7 +50,7 @@ export function HQAnalyticsCharts({ metrics }: { metrics: HQMetrics }) {
           segments={metrics.occupancy.map((item) => ({
             label: item.label,
             value: item.sold,
-            caption: `${Math.round((item.sold / item.capacity) * 100)}% · ${item.sold}/${item.capacity}`,
+            caption: `${item.pct}% · ${item.sold}/${item.capacity} · متبقي ${item.remaining}`,
           }))}
         />
       </div>

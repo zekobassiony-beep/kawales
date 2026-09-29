@@ -5,7 +5,7 @@ import { events, bookedSeats, venues } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
-import { calculateTotals } from "@/lib/pricing"
+import { clampPercent, couponPriceShape, distributeDiscount } from "@/lib/coupon-pricing"
 import { bookingBlockedReason } from "@/lib/booking-rules"
 import { sendBookingNotification, type BookingNotification } from "@/lib/telegram"
 import { runInBackground } from "@/lib/background"
@@ -61,6 +61,18 @@ export async function createBooking(input: {
   customerEmail: string
   customerPhone: string
   receipt?: { filename: string; mimeType: string; dataBase64: string }
+  /**
+   * كوبون الخصم (اختياري) — يُعالَج على السيرفر من جديد:
+   * النسبة تُحصر 0..100، وسقف الخصم يُحترم، ووضع رسوم الخدمة يُتحقق منه.
+   * ملاحظة: صلاحية الكود نفسه (نشِط/منتهي/مستهلك) مخزّنة في متصفح المنصة؛
+   * لتشغيلها على السيرفر لكل الزوار يُنقل المخزن إلى جدول `public.coupons`.
+   */
+  coupon?: {
+    code: string
+    discountPct: number
+    serviceFeeMode: "none" | "same" | "waived"
+    maxDiscountCents?: number
+  }
 }): Promise<BookingResult> {
   // ---- Request shape ----
   if (!input || typeof input !== "object") {
@@ -112,10 +124,38 @@ export async function createBooking(input: {
 
   // ---- Load the event, the venue and validate the sale window ----
   // The database is the source of truth for prices; the client never sends one.
-  const seatRecords: { seatId: string; tierId: string; tierName: string; priceCents: number }[] = []
+  const seatRecords: {
+    seatId: string
+    tierId: string
+    tierName: string
+    priceCents: number
+    originalPriceCents?: number
+  }[] = []
   let totalCents = 0
   let totals = { subtotalCents: 0, serviceFeeCents: 0, totalCents: 0 }
+  /** خصم التذاكر + ما تم إعفاؤه من رسوم الخدمة (لإشعار الإدارة). */
+  let couponDiscountCents = 0
+  let couponServiceFeeSavingCents = 0
   let eventTitle = ""
+
+  // ---- الكوبون (اختياري): تُحصر النسبة على السيرفر ولا يُقبل إجمالي من المتصفح ----
+  const rawCoupon = input.coupon && typeof input.coupon === "object" ? input.coupon : null
+  const coupon =
+    rawCoupon && typeof rawCoupon.code === "string" && rawCoupon.code.trim().length > 0
+      ? {
+          code: rawCoupon.code.trim().toUpperCase().slice(0, 40),
+          label: "",
+          discountPct: clampPercent(rawCoupon.discountPct),
+          serviceFeeMode:
+            rawCoupon.serviceFeeMode === "same" || rawCoupon.serviceFeeMode === "waived"
+              ? rawCoupon.serviceFeeMode
+              : ("none" as const),
+          maxDiscountCents:
+            Number.isFinite(rawCoupon.maxDiscountCents) && (rawCoupon.maxDiscountCents ?? 0) > 0
+              ? Math.round(rawCoupon.maxDiscountCents as number)
+              : 0,
+        }
+      : null
   let venueName = ""
   let venueCity = ""
   let eventStartsAt: Date | null = null
@@ -179,9 +219,27 @@ export async function createBooking(input: {
     venueCity = venue.city
     eventStartsAt = event.startsAt instanceof Date ? event.startsAt : new Date(event.startsAt)
 
-    // Service fee (10%, minimum 5) is added on top of the seat subtotal.
-    totals = calculateTotals(seatRecords.map((record) => record.priceCents))
-    totalCents = totals.totalCents
+    // التسعير: خصم الكوبون (إن وُجد) ثم رسوم الخدمة (10% بحد أدنى 5) على المبلغ بعد الخصم.
+    const priceShape = couponPriceShape(
+      seatRecords.map((record) => record.priceCents),
+      coupon,
+    )
+    totals = {
+      subtotalCents: priceShape.discountedSubtotalCents,
+      serviceFeeCents: priceShape.serviceFeeCents,
+      totalCents: priceShape.totalCents,
+    }
+    totalCents = priceShape.totalCents
+    couponDiscountCents = priceShape.discountCents
+    couponServiceFeeSavingCents = priceShape.serviceFeeSavingCents
+
+    // توزيع الخصم على المقاعد حتى يساوي مجموعها المبلغ المخفَّض بالضبط.
+    const originalPrices = seatRecords.map((record) => record.priceCents)
+    const discountedUnits = distributeDiscount(originalPrices, priceShape.discountedSubtotalCents)
+    seatRecords.forEach((record, index) => {
+      record.originalPriceCents = originalPrices[index]
+      record.priceCents = discountedUnits[index] ?? 0
+    })
   } catch (error) {
     logFailure("loading show data", error)
     return { ok: false, error: databaseFailureMessage(error) }
@@ -245,6 +303,16 @@ export async function createBooking(input: {
         subtotalCents: totals.subtotalCents,
         serviceFeeCents: totals.serviceFeeCents,
         totalCents,
+        coupon: coupon
+          ? {
+              code: coupon.code,
+              // الأصل = المخفَّض + الخصم + الرسوم المدفوعة + الرسوم المُعفاة.
+              originalTotalCents:
+                totals.subtotalCents + couponDiscountCents + totals.serviceFeeCents + couponServiceFeeSavingCents,
+              discountCents: couponDiscountCents,
+              serviceFeeSavingCents: couponServiceFeeSavingCents,
+            }
+          : undefined,
         receipt,
       }
       await runInBackground(

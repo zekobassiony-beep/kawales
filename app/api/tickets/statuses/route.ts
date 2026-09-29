@@ -37,7 +37,12 @@ export async function GET(req: NextRequest) {
     ids.map(async (id) => {
       const ticket = await getTicketFromDb(id)
       if (!ticket) return null
-      return { id: ticket.id, status: ticket.status, ticketImageUrl: ticket.ticketImageUrl ?? null }
+      return {
+        id: ticket.id,
+        status: ticket.status,
+        ticketImageUrl: ticket.ticketImageUrl ?? null,
+        checkedInAt: ticket.checkedInAt ?? null,
+      }
     }),
   )
 

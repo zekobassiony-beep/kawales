@@ -1,20 +1,34 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Loader2, Receipt, X } from "lucide-react"
+import { Loader2, Receipt, TicketPercent, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatPrice } from "@/lib/format"
+import { formatPriceLabel } from "@/lib/format"
+import { couponSnapshotFromShape, type CouponPriceShape } from "@/lib/coupon-pricing"
+import { redeemCoupon } from "@/lib/coupons"
 import type { EventWithRelations } from "@/lib/queries"
-import { createTicket, DEFAULT_PAYMENT_METHOD_ID, setTicketReceiptUrl, telegramTicketLink, type PaymentMethod, type Ticket } from "@/lib/tickets"
+import {
+  createTicket,
+  DEFAULT_PAYMENT_METHOD_ID,
+  FREE_COUPON_PAYMENT_METHOD_ID,
+  setTicketReceiptUrl,
+  telegramTicketLink,
+  type PaymentMethod,
+  type Ticket,
+} from "@/lib/tickets"
 import { notifyTicketAdmin, persistTicket, type PersistTicketResult } from "@/app/actions/tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { useSession } from "@/lib/session"
+import { CouponTotals } from "@/components/coupon-price"
 import { PaymentStep, TicketConfirmation } from "@/components/checkout-steps"
 
 /**
  * نافذة الدفع الموحّدة (Unified Payment Modal) — المصدر الوحيد لإتمام الدفع في
  * المشروع: اختيار وسيلة الدفع، إدخال رقم المحوّل، إرفاق صورة الإيصال، ثم
  * إنشاء التذكرة وحفظها في Supabase وإرسالها للإدارة على تليجرام.
+ *
+ * **مسار الكوبون المجاني:** لو صار الإجمالي صفرًا بعد كوبون (100% + إعفاء رسوم)
+ * نتخطّى التحويل والإيصال تمامًا ونُنشئ التذكرة بوسيلة `coupon_free`.
  */
 
 export type PaymentSelection = {
@@ -23,6 +37,8 @@ export type PaymentSelection = {
   tierName: string
   totalCents: number
   quantity: number
+  /** شكل السعر بعد الكوبون (إن طُبِّق كوبون) — للعرض والتخزين مع التذكرة. */
+  priceShape?: CouponPriceShape
 }
 
 export function PaymentModal({
@@ -79,15 +95,20 @@ export function PaymentModal({
   const customerName = session?.profile.fullName || session?.name || "ضيف كواليس"
   const customerEmail = session?.email ?? ""
   const seatsLabel = selection.seats.join("، ")
+  /** تذكرة مجانية بكوبون (100% + إعفاء رسوم الخدمة) ⇒ بلا تحويل ولا إيصال. */
+  const isFree = selection.totalCents <= 0
+  const couponSnapshot = selection.priceShape ? couponSnapshotFromShape(selection.priceShape) : undefined
 
   async function confirm() {
-    if (senderPhone.trim().length < 8) {
-      setError("أدخل رقم الموبايل الذي تم التحويل منه.")
-      return
-    }
-    if (!receiptImage) {
-      setError("أرفق صورة إيصال التحويل / Screenshot.")
-      return
+    if (!isFree) {
+      if (senderPhone.trim().length < 8) {
+        setError("أدخل رقم الموبايل الذي تم التحويل منه.")
+        return
+      }
+      if (!receiptImage) {
+        setError("أرفق صورة إيصال التحويل / Screenshot.")
+        return
+      }
     }
     setError(null)
     setBusy(true)
@@ -104,10 +125,11 @@ export function PaymentModal({
       tierName: selection.tierName,
       startsAtIso: event.startsAt.toISOString(),
       totalCents: selection.totalCents,
-      paymentMethod: method,
-      paymentRef: senderPhone,
-      senderPhone,
-      receiptImage,
+      paymentMethod: isFree ? FREE_COUPON_PAYMENT_METHOD_ID : method,
+      paymentRef: isFree ? "coupon" : senderPhone,
+      senderPhone: isFree ? undefined : senderPhone,
+      receiptImage: isFree ? undefined : receiptImage,
+      coupon: couponSnapshot,
     })
 
     setTicket(created)
@@ -118,6 +140,17 @@ export function PaymentModal({
 
     // استبدال Base64 الثقيل في التخزين المحلي بالرابط العام (أخف بكثير وأسرع في القراءة).
     if (result.receiptUrl) setTicketReceiptUrl(created.id, result.receiptUrl)
+
+    // تسجيل استخدام الكوبون **مرة واحدة** بعد نجاح حفظ التذكرة (يُستهلك الكود عند بلوغ السقف).
+    if (result.ok && selection.priceShape?.couponCode) {
+      redeemCoupon(selection.priceShape.couponCode, {
+        ticketId: created.id,
+        customerId: customerEmail,
+        discountCents: selection.priceShape.discountCents,
+        serviceFeeSavingCents: selection.priceShape.serviceFeeSavingCents,
+        totalCents: selection.totalCents,
+      })
+    }
 
     setOutcome(result)
     setBusy(false)
@@ -225,7 +258,7 @@ export function PaymentModal({
           </div>
         ) : (
           <div className="space-y-4 p-5">
-            {/* ملخص الطلب */}
+            {/* ملخص الطلب — بشكل الخصم عند تطبيق كوبون */}
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-zinc-100">{seatsLabel || selection.tierName}</p>
@@ -233,18 +266,42 @@ export function PaymentModal({
                   {selection.quantity} تذكرة · {selection.tierName}
                 </p>
               </div>
-              <p className="font-serif text-xl font-bold text-amber-400">{formatPrice(selection.totalCents)}</p>
+              <p className={cn("font-serif text-xl font-bold", isFree ? "text-emerald-400" : "text-amber-400")}>
+                {formatPriceLabel(selection.totalCents)}
+              </p>
             </div>
 
-            <PaymentStep
-              totalCents={selection.totalCents}
-              method={method}
-              onChange={setMethod}
-              senderPhone={senderPhone}
-              onSenderPhoneChange={setSenderPhone}
-              receiptImage={receiptImage}
-              onReceiptChange={setReceiptImage}
-            />
+            {/* تفصيل الكوبون: السعر الأصلي مشطوب + رسوم الخدمة (مجانًا عند الإعفاء) */}
+            {selection.priceShape && (
+              <div className="space-y-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4">
+                <p className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-emerald-300">
+                  <TicketPercent className="h-3.5 w-3.5" />
+                  كوبون مُطبَّق
+                  <span className="font-mono" dir="ltr">
+                    {selection.priceShape.couponCode}
+                  </span>
+                  {selection.priceShape.couponLabel ? <span>· {selection.priceShape.couponLabel}</span> : null}
+                </p>
+                <CouponTotals shape={selection.priceShape} />
+              </div>
+            )}
+
+            {isFree ? (
+              <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs font-semibold leading-relaxed text-emerald-200">
+                🎟️ تذكرة مجانية بالكامل — لا حاجة لتحويل أي مبلغ ولا لإرفاق إيصال. اضغط التأكيد وسيُرسل
+                طلبك للإدارة مباشرة.
+              </p>
+            ) : (
+              <PaymentStep
+                totalCents={selection.totalCents}
+                method={method}
+                onChange={setMethod}
+                senderPhone={senderPhone}
+                onSenderPhoneChange={setSenderPhone}
+                receiptImage={receiptImage}
+                onReceiptChange={setReceiptImage}
+              />
+            )}
 
             {error && (
               <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
@@ -257,8 +314,9 @@ export function PaymentModal({
               onClick={confirm}
               disabled={busy}
               className={cn(
-                "flex w-full items-center justify-center gap-2 rounded-full bg-amber-500 px-6 py-3 text-sm font-bold text-zinc-950 transition-colors",
-                busy ? "cursor-wait opacity-70" : "hover:bg-amber-400",
+                "flex w-full items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-bold text-zinc-950 transition-colors",
+                isFree ? "bg-emerald-500 hover:bg-emerald-400" : "bg-amber-500 hover:bg-amber-400",
+                busy && "cursor-wait opacity-70",
               )}
             >
               {busy ? (
@@ -266,6 +324,8 @@ export function PaymentModal({
                   <Loader2 className="h-4 w-4 animate-spin" />
                   جارٍ الحفظ…
                 </>
+              ) : isFree ? (
+                "تأكيد التذكرة المجانية"
               ) : (
                 "إتمام الحجز وإرسال الإيصال للمراجعة"
               )}

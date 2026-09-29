@@ -1,23 +1,26 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Activity, BadgeCheck, CreditCard, KeyRound, Megaphone, ShieldCheck, Ticket } from "lucide-react"
+import { Activity, BadgeCheck, CreditCard, KeyRound, Megaphone, ShieldCheck, Ticket, TicketPercent } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTickets } from "@/lib/tickets"
 import { useServerTickets } from "@/components/use-server-tickets"
 import { usePaymentMethods } from "@/lib/payment-methods"
 import { inviteCodeStats, useInviteCodes } from "@/lib/invite-codes"
+import { couponStats, useCoupons } from "@/lib/coupons"
 import { useVerifiedEntities } from "@/lib/badges"
 import { useReviews } from "@/lib/reviews"
 import { useFlashBanner } from "@/lib/flash-banner"
 import { PaymentManager } from "@/app/hq-kawalees/payment-manager"
 import { InviteCenter } from "@/app/hq-kawalees/invite-center"
 import { FlashBannerEditor } from "@/app/hq-kawalees/flash-banner-editor"
+import { CouponCenter } from "@/app/hq-kawalees/coupon-center"
 
-type HqTab = "overview" | "payments" | "invites" | "banner"
+type HqTab = "overview" | "payments" | "invites" | "coupons" | "banner"
 
 const TABS: { id: HqTab; label: string; icon: typeof Activity }[] = [
   { id: "overview", label: "نظرة عامة", icon: Activity },
+  { id: "coupons", label: "كوبونات الخصم", icon: TicketPercent },
   { id: "payments", label: "وسائل الدفع", icon: CreditCard },
   { id: "invites", label: "الأكواد والتوثيق", icon: KeyRound },
   { id: "banner", label: "نشرة التنبيهات", icon: Megaphone },
@@ -27,7 +30,7 @@ const TABS: { id: HqTab; label: string; icon: typeof Activity }[] = [
 export function HqDashboard({ adminName }: { adminName: string }) {
   const [tab, setTab] = useState<HqTab>("overview")
   const localTickets = useTickets()
-  const { tickets: serverTickets } = useServerTickets()
+  const { tickets: serverTickets } = useServerTickets(undefined, { pollIntervalMs: 60_000 })
   // دمج سجل Supabase (مصدر الحقيقة) مع المخزن المحلي.
   const tickets = useMemo(() => {
     if (serverTickets.length === 0) return localTickets
@@ -41,18 +44,21 @@ export function HqDashboard({ adminName }: { adminName: string }) {
   const entities = useVerifiedEntities()
   const reviews = useReviews()
   const banner = useFlashBanner()
+  const coupons = useCoupons()
 
   const stats = useMemo(() => {
     const codeStats = inviteCodeStats(codes)
+    const couponState = couponStats(coupons)
     return [
       { label: "إجمالي التذاكر", value: String(tickets.length), hint: "من مخزن المنصة" },
       { label: "حضور عند البوابة", value: String(tickets.filter((ticket) => ticket.status === "checked_in").length), hint: "تذاكر مسحت فعلًا" },
       { label: "وسائل دفع مفعّلة", value: String(methods.filter((method) => method.isActive).length), hint: `من ${methods.length} وسيلة` },
       { label: "أكواد متاحة", value: String(codeStats.available), hint: `${codeStats.used} مستعمل` },
+      { label: "كوبونات نشِطة", value: String(couponState.active), hint: `${couponState.redemptions} استخدام · من ${couponState.total}` },
       { label: "كيانات موثقة", value: String(entities.length), hint: "شارات ذهبية/زرقاء" },
       { label: "تقييمات موثقة", value: String(reviews.length), hint: "من جمهور حضر فعلًا" },
     ]
-  }, [codes, entities.length, methods, reviews.length, tickets])
+  }, [codes, coupons, entities.length, methods, reviews.length, tickets])
 
   return (
     <div className="space-y-6">
@@ -115,6 +121,7 @@ export function HqDashboard({ adminName }: { adminName: string }) {
 
       {tab === "payments" && <PaymentManager />}
       {tab === "invites" && <InviteCenter />}
+      {tab === "coupons" && <CouponCenter />}
       {tab === "banner" && <FlashBannerEditor />}
     </div>
   )

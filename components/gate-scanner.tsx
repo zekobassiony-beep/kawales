@@ -1,9 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { AlertTriangle, Camera, CheckCircle2, History, ScanLine, Ticket as TicketIcon, XCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { QrCameraScanner } from "@/components/qr-camera-scanner"
+import { checkInTicketServer } from "@/app/actions/tickets"
+import { parseTicketCode } from "@/lib/ticket-code"
 import {
+  applyServerTicketUpdate,
   checkInTicket,
   formatCheckInTime,
   scannableTickets,
@@ -83,34 +87,66 @@ export function GateScanner() {
   const [code, setCode] = useState("")
   const [result, setResult] = useState<CheckInResult | null>(null)
   const [history, setHistory] = useState<ScanEntry[]>([])
-  const [scanning, setScanning] = useState(false)
+  /** حالة الكاميرا (مفتوحة/مغلقة) وتنبيه فشل الوصول للسيرفر. */
+  const [cameraOn, setCameraOn] = useState(false)
+  const [serverNotice, setServerNotice] = useState("")
 
   const scannable = useMemo(() => scannableTickets(), [tickets])
   const handled = useMemo(() => tickets.filter((ticket) => ticket.status === "checked_in"), [tickets])
 
-  const runCheckIn = (rawCode: string) => {
-    const reference = rawCode.trim().toUpperCase()
+  const runCheckIn = useCallback(async (rawCode: string) => {
+    const reference = parseTicketCode(rawCode) || rawCode.trim().toUpperCase()
     if (reference.length === 0) return
+    setCode("")
+
+    /** يضيف العملية إلى سجل الشاشة (آخر ٦ عمليات). */
+    const record = (outcome: CheckInOutcome) =>
+      setHistory((current) => [
+        { code: reference, outcome, at: new Date().toISOString() },
+        ...current.slice(0, 5),
+      ])
+
+    // (1) السيرفر أولًا: مصدر الحقيقة، ومنع التكرار ذرّي بين كل أجهزة البوابة.
+    try {
+      const remote = await checkInTicketServer(rawCode)
+      // «فشل تقني» فقط (شبكة/قاعدة) ⇒ نسقط للتخزين المحلي بلا إظهار رفض كاذب.
+      const technicalFailure =
+        remote.outcome === "not_found" && Boolean(remote.error) && remote.error !== "invalid_code"
+
+      if (!technicalFailure) {
+        if (remote.ticket) {
+          // نُحدّث النسخة المحلية بما حسمه السيرفر (يظهر فورًا في العميل بلا إعادة تحميل).
+          applyServerTicketUpdate({
+            id: remote.ticket.id,
+            status: remote.ticket.status,
+            checkedInAt: remote.checkedInAt ?? null,
+            ticketImageUrl: remote.ticket.ticketImageUrl ?? null,
+          })
+        }
+        setServerNotice("")
+        setResult({
+          outcome: remote.outcome,
+          ticket: remote.ticket,
+          message: remote.message,
+          checkedInAt: remote.checkedInAt,
+        })
+        playFeedback(remote.outcome)
+        record(remote.outcome)
+        return
+      }
+
+      setServerNotice(remote.message)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      setServerNotice(`تعذّر الوصول إلى السيرفر (${reason}) — تم التحقق محليًا على هذا الجهاز فقط.`)
+    }
+
+    // (2) بديل محلي: تبقى البوابة تعمل لو انقطعت الشبكة (تسجيل على هذا الجهاز فقط).
     const outcome = checkInTicket(reference)
     setResult(outcome)
-    setCode("")
     playFeedback(outcome.outcome)
-    setHistory((current) => [
-      { code: reference, outcome: outcome.outcome, at: new Date().toISOString() },
-      ...current.slice(0, 5),
-    ])
-  }
-
-  /* محاكاة ماسح كاميرا QR: يقرأ تذكرة جاهزة، أو يعيد مسح تذكرة سبق دخولها، أو رمزًا مجهولًا. */
-  const simulateCameraScan = () => {
-    setScanning(true)
-    window.setTimeout(() => {
-      const target = scannable[0] ?? handled[0] ?? null
-      const fallbackCode = `KW-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
-      runCheckIn(target ? target.id : fallbackCode)
-      setScanning(false)
-    }, 550)
-  }
+    record(outcome.outcome)
+  }, [])
 
   return (
     <div className="space-y-4">
@@ -125,7 +161,7 @@ export function GateScanner() {
             value={code}
             onChange={(event) => setCode(event.target.value.toUpperCase())}
             onKeyDown={(event) => {
-              if (event.key === "Enter") runCheckIn(code)
+              if (event.key === "Enter") void runCheckIn(code)
             }}
             placeholder="KW-XXXXXX"
             dir="ltr"
@@ -135,21 +171,41 @@ export function GateScanner() {
           <button
             type="button"
             disabled={code.trim().length === 0}
-            onClick={() => runCheckIn(code)}
+            onClick={() => void runCheckIn(code)}
             className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             تحقق وسجّل الحضور
           </button>
           <button
             type="button"
-            onClick={simulateCameraScan}
-            disabled={scanning}
-            className="inline-flex items-center gap-2 rounded-full border border-primary/50 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+            onClick={() => setCameraOn((value) => !value)}
+            aria-pressed={cameraOn}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition-colors",
+              cameraOn
+                ? "border-destructive/50 bg-destructive/10 text-destructive-foreground hover:bg-destructive/20"
+                : "border-primary/50 bg-primary/10 text-primary hover:bg-primary/20",
+            )}
           >
-            <Camera className={cn("h-3.5 w-3.5", scanning && "animate-pulse")} />
-            {scanning ? "جارٍ قراءة QR…" : "محاكاة مسح كاميرا QR 📷"}
+            <Camera className={cn("h-3.5 w-3.5", cameraOn && "animate-pulse")} />
+            {cameraOn ? "إيقاف الكاميرا" : "مسح بكاميرا الجهاز 📷"}
           </button>
         </div>
+
+        {cameraOn && (
+          <QrCameraScanner
+            active={cameraOn}
+            onDetected={(raw) => void runCheckIn(raw)}
+            className="mt-4 bg-background/40"
+          />
+        )}
+
+        {serverNotice && (
+          <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {serverNotice}
+          </p>
+        )}
         <p className="mt-2 text-[11px] text-muted-foreground">
           التذاكر الجاهزة للمسح الآن: <span className="font-bold text-foreground">{scannable.length}</span> · تم تسجيل
           حضورها سابقًا: <span className="font-bold text-foreground">{handled.length}</span>
@@ -159,7 +215,7 @@ export function GateScanner() {
       {result && <ScanResultPanel result={result} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <QuickPick tickets={scannable} onPick={runCheckIn} />
+        <QuickPick tickets={scannable} onPick={(value) => void runCheckIn(value)} />
         <ScanHistory entries={history} />
       </div>
     </div>

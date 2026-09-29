@@ -40,6 +40,15 @@ export function formatPrice(piastres: number): string {
   return `${NUMBER_FORMATTER.format(Math.round(piastres) / 100)} ${CURRENCY_LABEL}`
 }
 
+/**
+ * سعر قابل للعرض مع كلمة **«مجانًا»** عند الصفر — تُستخدم في الكوبونات وخصومات
+ * رسوم الخدمة بدل «0 ج.م» حتى يبان الخصم بوضوح.
+ */
+export function formatPriceLabel(piastres: number): string {
+  if (!Number.isFinite(piastres) || Math.round(piastres) <= 0) return "مجانًا"
+  return formatPrice(piastres)
+}
+
 export function formatDate(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date
   return clean(DATE_FORMATTER.format(d))

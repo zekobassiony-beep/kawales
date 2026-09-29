@@ -1,10 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   Activity,
   AlertTriangle,
+  Armchair,
   ArrowUpRight,
   Building2,
   CreditCard,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useServerTickets } from "@/components/use-server-tickets"
+import { useTicketStats } from "@/components/use-ticket-stats"
 import { AdminUsersManager } from "@/app/dashboard/admin/admin-users-manager"
 import { PaymentManager } from "@/app/hq-kawalees/payment-manager"
 import { InviteCenter } from "@/app/hq-kawalees/invite-center"
@@ -70,26 +72,45 @@ export function AdminConsole({
   events: HQEventInput[]
 }) {
   const [tab, setTab] = useState<AdminTab>("overview")
-  const { tickets, loading, reload } = useServerTickets()
+  const { tickets, loading, reload } = useServerTickets(undefined, { pollIntervalMs: 60_000 })
+  // الأرقام الإجمالية من تجميع قاعدة البيانات ⇒ دقيقة عند أي عدد تذاكر.
+  const { stats: ticketStats, refresh: refreshStats } = useTicketStats()
   const ops = useHqOps()
   const opsStats = useMemo(() => hqOpsStats(ops), [ops])
 
-  const metrics = useMemo(
-    () =>
-      computeHqMetrics({
-        events,
-        tickets: tickets.map((ticket) => ({
-          totalCents: ticket.totalCents,
-          status: ticket.status,
-          createdAt: ticket.createdAt,
-          venue: ticket.venue,
-          showTitle: ticket.showTitle,
-          seats: ticket.seats,
-        })),
-        ops,
-      }),
-    [events, tickets, ops],
-  )
+  /** تحديث يدوي شامل: قائمة التذاكر + الأرقام الإجمالية. */
+  const refreshAll = useCallback(async () => {
+    await Promise.all([reload(), refreshStats()])
+  }, [reload, refreshStats])
+
+  const metrics = useMemo(() => {
+    // دليل العروض: جدول التذاكر لا يخزّن اسم العرض ولا المكان، فنُكملها من قائمة العروض
+    // عبر معرّف العرض ⇒ فيصحّ رسم «الأكثر مبيعًا» و«الإيراد حسب المحافظة».
+    const eventById = new Map(events.map((event) => [String(event.id), event]))
+    const enrichedTickets = tickets.map((ticket) => {
+      const event = eventById.get(String(ticket.showId))
+      return {
+        totalCents: ticket.totalCents,
+        status: ticket.status,
+        createdAt: ticket.createdAt,
+        venue: ticket.venue || (event ? `${event.venueName}، ${event.city}` : ""),
+        showTitle: ticket.showTitle || event?.title || "",
+        seats: ticket.seats,
+      }
+    })
+
+    const base = computeHqMetrics({ events, tickets: enrichedTickets, ops })
+    if (!ticketStats || ticketStats.source === "unavailable") return base
+
+    // عدد التذاكر المعتمدة والإيراد من **تجميع قاعدة البيانات** (لا من القائمة
+    // المحدودة)، فيبقى الرقم صحيحًا عند أي عدد تذاكر. الرسوم الزمنية تبقى من
+    // أحدث الصفوف المحمّلة.
+    return {
+      ...base,
+      ticketsSold: ticketStats.approved + ticketStats.checkedIn,
+      revenueCents: ticketStats.source === "rpc" ? ticketStats.revenueCents : base.revenueCents,
+    }
+  }, [events, tickets, ops, ticketStats])
 
   const kpis: HqKpi[] = useMemo(
     () => [
@@ -102,6 +123,15 @@ export function AdminConsole({
         tone: "gold",
         trendPct: metrics.revenueGrowthPct,
         spark: metrics.revenueTrend.map((point) => point.value),
+      },
+      {
+        id: "seats",
+        label: "المقاعد المتبقية",
+        value: String(metrics.seatsRemaining),
+        hint: `${metrics.soldTotal} مباع من ${metrics.capacityTotal} مقعد · إشغال ${metrics.occupancyPct}%`,
+        icon: Armchair,
+        tone: "emerald",
+        attention: metrics.capacityTotal > 0 && metrics.seatsRemaining === 0,
       },
       {
         id: "shows",
@@ -224,7 +254,7 @@ export function AdminConsole({
           <HQQuickActionBar
             onOpenInvites={() => setTab("invites")}
             onExport={handleExport}
-            onRefresh={() => void reload()}
+            onRefresh={() => void refreshAll()}
             refreshing={loading}
           />
           <HQKpiGrid kpis={kpis} />

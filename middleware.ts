@@ -2,11 +2,11 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import {
   ADMIN_USERS_TABLE,
-  SESSION_EMAIL_COOKIE,
   isAdminPath,
   isMasterAdminEmail,
   normalizeAdminEmail,
 } from "@/lib/auth-constants"
+import { HQ_PATH, isSuperadmin } from "@/lib/roles"
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config"
 
 /**
@@ -16,7 +16,10 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/sup
  *  2) لا مستخدم ⇒ إعادة توجيه إلى `/login?next=...`.
  *  3) البريد الأساسي ⇒ دخول فوري.
  *  4) غيره ⇒ فحص جدول `admin_users` (بمفتاح anon) ⇒ دخول أو `/login?denied=1`.
- *  5) لا يزال يدعم كوكي الجلسة المحلية كـ **fallback** للجلسة التجريبية السابقة.
+ *  5) `/hq-kawalees` (غرفة العمليات) ⇒ بريدات السوبر أدمن فقط.
+ *
+ * ⚠️ أمنيًا: لم يبقَ أي اعتماد على كوكي بريد يكتبه المتصفح (`kawalees:email`)؛
+ * كان أي زائر يكتبه ببريد السوبر أدمن فيدخل اللوحة بلا كلمة مرور.
  */
 
 const supabaseReady = isSupabaseConfigured()
@@ -67,25 +70,35 @@ export async function middleware(req: NextRequest) {
     sessionEmail = normalizeAdminEmail(data.user?.email)
   }
 
-  // حماية مسارات الأدمن فقط (بقية المسارات تمرّ مع تحديث الجلسة).
-  if (!isAdminPath(req.nextUrl.pathname)) return response
+  const pathname = req.nextUrl.pathname
+  const isHq = pathname === HQ_PATH || pathname.startsWith(`${HQ_PATH}/`)
 
-  // fallback: كوكي الجلسة المحلية (التجريبية) عند غياب جلسة Supabase.
-  const legacyEmail = normalizeAdminEmail(req.cookies.get(SESSION_EMAIL_COOKIE)?.value)
-  const email = sessionEmail || legacyEmail
+  // حماية مسارات الأدمن وغرفة العمليات (بقية المسارات تمرّ مع تحديث الجلسة).
+  if (!isAdminPath(pathname) && !isHq) return response
 
-  // (2) لا جلسة معروفة ⇒ صفحة الدخول مع العودة للمسار المطلوب.
+  // (2) الجلسة الرسمية فقط — لا كوكي بريد مكتوب من المتصفح (أُزيل مسار الانتحال).
+  //     لا مستخدم ⇒ صفحة الدخول مع العودة للمسار المطلوب.
+  const email = sessionEmail
   if (!email) {
     const loginUrl = req.nextUrl.clone()
     loginUrl.pathname = "/login"
-    loginUrl.search = `?next=${encodeURIComponent(req.nextUrl.pathname)}`
+    loginUrl.search = `?next=${encodeURIComponent(pathname)}`
     return redirectKeepingSession(loginUrl, response)
   }
 
-  // (3) السوبر أدمن الأساسي: دخول فوري.
+  // (3) غرفة عمليات كواليس: بريدات السوبر أدمن فقط (لا يكفي كونك أدمن لوحة).
+  if (isHq) {
+    if (isSuperadmin(email) || isMasterAdminEmail(email)) return response
+    const deniedHq = req.nextUrl.clone()
+    deniedHq.pathname = "/login"
+    deniedHq.search = "?denied=1"
+    return redirectKeepingSession(deniedHq, response)
+  }
+
+  // (4) السوبر أدمن الأساسي: دخول فوري.
   if (isMasterAdminEmail(email)) return response
 
-  // (4) بقية الأدمنز: من جدول admin_users على Supabase.
+  // (5) بقية الأدمنز: من جدول admin_users على Supabase.
   if (await isEmailInAdminTable(email)) return response
 
   const deniedUrl = req.nextUrl.clone()
@@ -100,6 +113,9 @@ export const config = {
     "/admin/:path*",
     "/dashboard/admin",
     "/dashboard/admin/:path*",
+    // غرفة عمليات كواليس (السوبر أدمن فقط) — حماية على السيرفر لا على المتصفح.
+    "/hq-kawalees",
+    "/hq-kawalees/:path*",
     // اختصارات لوحات التشغيل (مخرج العروض وبوابة المسرح) — محميّة بنفس بوابة الأدمن.
     "/producer",
     "/producer/:path*",

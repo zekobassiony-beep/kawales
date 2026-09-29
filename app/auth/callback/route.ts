@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config"
 import { resolvePostLoginPath } from "@/lib/supabase/auth-server"
-import { SESSION_EMAIL_COOKIE, normalizeAdminEmail } from "@/lib/auth-constants"
+import { normalizeAdminEmail } from "@/lib/auth-constants"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -60,17 +60,8 @@ export async function GET(req: NextRequest) {
 
   const email = normalizeAdminEmail(data.user.email)
   const target = await resolvePostLoginPath(email, next)
-  const response = NextResponse.redirect(new URL(target, baseUrl))
 
-  // انعكاس بريد الجلسة في كوكي الوسيط (ليزامن حماية مسارات الأدمن فورًا).
-  if (email) {
-    response.cookies.set(SESSION_EMAIL_COOKIE, email, {
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-      sameSite: "lax",
-      httpOnly: false,
-    })
-  }
-
-  return response
+  // جلسة Supabase نفسها هي ما يحمي المسارات (كوكيز مُوقَّعة يقرأها الوسيط)،
+  // فلا نكتب أي كوكي بريد من هنا — كان ذلك يسمح بانتحال بريد الأدمن.
+  return NextResponse.redirect(new URL(target, baseUrl))
 }

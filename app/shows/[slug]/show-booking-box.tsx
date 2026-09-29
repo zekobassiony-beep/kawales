@@ -3,11 +3,15 @@
 import { useMemo, useState } from "react"
 import { Armchair, ShoppingBag, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatPrice, tierForRow } from "@/lib/format"
+import { formatPriceLabel, tierForRow } from "@/lib/format"
 import { MAX_SEATS_PER_BOOKING, parseSeatId } from "@/lib/seats"
 import { calculateTotals } from "@/lib/pricing"
-import { groupDiscount, occupancyInfo } from "@/lib/show-detail"
+import { couponPriceShape } from "@/lib/coupon-pricing"
+import { groupDiscount, lowestPriceCents, occupancyInfo } from "@/lib/show-detail"
+import type { Coupon } from "@/lib/coupons"
 import type { EventWithRelations } from "@/lib/queries"
+import { CouponBox } from "@/components/coupon-box"
+import { CouponAppliedNote, CouponPrice, CouponTotals } from "@/components/coupon-price"
 import { QuantityRow, SIDEBAR_CARD, TierOption } from "@/app/shows/[slug]/show-booking-parts"
 import { NumberedSeats } from "@/components/checkout-steps"
 import { PaymentModal, type PaymentSelection } from "@/components/payment-modal"
@@ -44,36 +48,64 @@ export function ShowBookingBox({
   const selectedTier = tiers.find((tier) => tier.id === selectedId) ?? tiers[0]
   const unitCents = selectedTier?.priceCents ?? 0
   const deal = useMemo(() => groupDiscount(quantity, unitCents), [quantity, unitCents])
-  const minPrice = Math.min(...tiers.map((tier) => tier.priceCents), 0)
+  const minPrice = lowestPriceCents(tiers)
   const soldOut = occupancy.remaining === 0
   const blocked = Boolean(blockedReason)
 
-  const selection = useMemo<PaymentSelection | null>(() => {
+  /** كوبون الزائر المطبَّق على الأسعار (اختياري). */
+  const [coupon, setCoupon] = useState<Coupon | null>(null)
+
+  /**
+   * أسعار التذاكر الحالية **قبل** الكوبون:
+   * - المقاعد التفاعلية: سعر فئة كل مقعد مختار.
+   * - الفئات العامة: سعر الفئة × الكمية بعد خصم الشلة (ثم يُطبَّق الكوبون فوقه).
+   */
+  const seatPrices = useMemo(() => {
     if (interactive) {
-      if (selectedSeats.length === 0) return null
-      const items = selectedSeats.map((seatId) => {
+      return selectedSeats.map((seatId) => {
         const parsed = parseSeatId(seatId)
-        const tier = parsed ? tierForRow(tiers, parsed.rowIndex) : undefined
-        return { priceCents: tier?.priceCents ?? 0, tierName: tier?.name ?? "—" }
+        return parsed ? (tierForRow(tiers, parsed.rowIndex)?.priceCents ?? 0) : 0
       })
-      const totals = calculateTotals(items.map((item) => item.priceCents))
-      const names = [...new Set(items.map((item) => item.tierName))]
-      return {
-        seats: [...selectedSeats].sort(),
-        tierName: names.join(" + ") || "—",
-        totalCents: totals.totalCents,
-        quantity: items.length,
-      }
     }
-    if (!selectedTier) return null
-    const totals = calculateTotals(Array.from({ length: quantity }, () => selectedTier.priceCents))
+    return deal.totalCents > 0 ? [deal.totalCents] : []
+  }, [interactive, selectedSeats, tiers, deal.totalCents])
+
+  /** شكل السعر بعد الكوبون — مصدر الحقيقة لكل ما يُعرض ولمبلغ الدفع. */
+  const priceShape = useMemo(() => couponPriceShape(seatPrices, coupon), [seatPrices, coupon])
+  const minPriceShape = useMemo(() => couponPriceShape([minPrice], coupon), [minPrice, coupon])
+
+  const selection = useMemo<PaymentSelection | null>(() => {
+    if (seatPrices.length === 0) return null
+
+    const names = interactive
+      ? [
+          ...new Set(
+            seatPrices.map((_, index) => {
+              const parsed = parseSeatId(selectedSeats[index] ?? "")
+              return parsed ? (tierForRow(tiers, parsed.rowIndex)?.name ?? "—") : "—"
+            }),
+          ),
+        ]
+      : [selectedTier?.name ?? "—"]
+
     return {
-      seats: [`${quantity} × ${selectedTier.name}`],
-      tierName: selectedTier.name,
-      totalCents: totals.totalCents,
-      quantity,
+      seats: interactive ? [...selectedSeats].sort() : [`${quantity} × ${selectedTier?.name ?? "—"}`],
+      tierName: names.join(" + ") || "—",
+      totalCents: priceShape.totalCents,
+      quantity: seatPrices.length,
+      /** شكل السعر بعد الكوبون: يُعرض في نافذة الدفع ويُخزَّن مع التذكرة. */
+      priceShape: coupon && priceShape.hasDiscount ? priceShape : undefined,
     }
-  }, [interactive, selectedSeats, tiers, selectedTier, quantity])
+  }, [
+    interactive,
+    selectedSeats,
+    selectedTier,
+    seatPrices,
+    tiers,
+    quantity,
+    coupon,
+    priceShape,
+  ])
 
   const toggleSeat = (seatId: string) => {
     if (selectedSeats.includes(seatId)) {
@@ -91,10 +123,17 @@ export function ShowBookingBox({
     <div className={cn(SIDEBAR_CARD, "overflow-hidden")}>
       <div className="border-b border-zinc-800 bg-gradient-to-l from-amber-500/10 via-transparent to-transparent p-5">
         <p className="text-xs text-zinc-400">يبدأ من</p>
-        <p className="mt-1 font-serif text-3xl font-bold text-amber-400">
-          {formatPrice(minPrice)}
-          <span className="ms-1 text-sm font-normal text-zinc-500">/ تذكرة</span>
-        </p>
+        {coupon && minPriceShape.hasDiscount ? (
+          <p className="mt-1 flex flex-wrap items-baseline gap-2">
+            <CouponPrice shape={minPriceShape} size="xl" />
+            <span className="text-sm font-normal text-zinc-500">/ تذكرة</span>
+          </p>
+        ) : (
+          <p className="mt-1 font-serif text-3xl font-bold text-amber-400">
+            {formatPriceLabel(minPrice)}
+            <span className="ms-1 text-sm font-normal text-zinc-500">/ تذكرة</span>
+          </p>
+        )}
 
         <div className="mt-4 space-y-1.5">
           <div className="flex items-center justify-between text-[11px]">
@@ -112,11 +151,24 @@ export function ShowBookingBox({
       <div className="space-y-4 p-5">
         {interactive ? (
           <>
-            <NumberedSeats event={event} selected={selectedSeats} onToggle={toggleSeat} bookedSeatIds={bookedSeatIds} />
+            <NumberedSeats
+              event={event}
+              selected={selectedSeats}
+              onToggle={toggleSeat}
+              bookedSeatIds={bookedSeatIds}
+              coupon={coupon}
+            />
             {selection ? (
               <p className="text-sm text-zinc-300">
                 المختار: <span className="font-bold text-zinc-100">{selection.quantity}</span> · الإجمالي:{" "}
-                <span className="font-serif font-bold text-amber-400">{formatPrice(selection.totalCents)}</span>{" "}
+                <span
+                  className={cn(
+                    "font-serif font-bold",
+                    priceShape.isFree ? "text-emerald-400" : "text-amber-400",
+                  )}
+                >
+                  {formatPriceLabel(priceShape.totalCents)}
+                </span>{" "}
                 <span className="text-xs text-zinc-500">(شامل رسوم الخدمة)</span>
               </p>
             ) : (
@@ -141,6 +193,7 @@ export function ShowBookingBox({
                     index={index}
                     active={tier.id === selectedTier?.id}
                     remaining={Math.max(0, Math.round(occupancy.remaining / Math.max(1, tiers.length)))}
+                    priceShape={coupon ? couponPriceShape([tier.priceCents], coupon) : undefined}
                     onSelect={() => {
                       setSelectedId(tier.id)
                       setQuantity(1)
@@ -155,13 +208,27 @@ export function ShowBookingBox({
                 quantity={quantity}
                 maxQuantity={Math.min(8, Math.max(1, occupancy.remaining))}
                 unitCents={unitCents}
-                totalCents={deal.totalCents}
+                totalCents={coupon ? priceShape.discountedSubtotalCents : deal.totalCents}
                 discountPct={deal.pct}
                 savingsCents={deal.savingsCents}
                 onChange={setQuantity}
               />
             )}
           </>
+        )}
+
+        {/* كوبون الخصم (اختياري): يُطبَّق لحظيًا على السعر ورسوم الخدمة معًا */}
+        {!soldOut && !blocked && (
+          <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3.5">
+            <CouponBox
+              context={{ eventId: event.id, troupeId: event.troupe.id, venueId: event.venue.id }}
+              applied={coupon}
+              onApply={setCoupon}
+              onClear={() => setCoupon(null)}
+            />
+            {coupon && <CouponAppliedNote shape={priceShape} />}
+            {coupon && selection && <CouponTotals shape={priceShape} />}
+          </div>
         )}
 
         {canProceed ? (

@@ -17,6 +17,7 @@ import {
   type AccountRole,
 } from "@/lib/roles"
 import { completeOnboarding, useSession, type SessionProfile, type SessionUser } from "@/lib/session"
+import { saveMyProfile } from "@/app/actions/profile"
 
 const INPUT_CLASS =
   "mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
@@ -57,6 +58,7 @@ function ProfileForm({ user }: { user: SessionUser }) {
   const router = useRouter()
   const [form, setForm] = useState<SessionProfile>(user.profile)
   const [errors, setErrors] = useState<FormErrors>({})
+  const [saveError, setSaveError] = useState("")
   const [pending, startTransition] = useTransition()
 
   function update<K extends keyof SessionProfile>(key: K, value: SessionProfile[K]) {
@@ -74,9 +76,21 @@ function ProfileForm({ user }: { user: SessionUser }) {
     const nextErrors = validateProfile(role, form)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
-    startTransition(() => {
+
+    startTransition(async () => {
       const saved = completeOnboarding(form)
-      router.push(saved ? dashboardPathForRole(saved.role) : LOGIN_PATH)
+      if (!saved) {
+        router.push(LOGIN_PATH)
+        return
+      }
+
+      // الحفظ الدائم في قاعدة البيانات (جدول `profiles`): بهذا يجد المستخدم بياناته
+      // عند تسجيل الدخول من أي جهاز بدلًا من ضياعها مع تخزين المتصفح.
+      setSaveError("")
+      const result = await saveMyProfile({ role: saved.role, onboarded: true, profile: form })
+      if (!result.ok) setSaveError(result.error)
+
+      router.push(dashboardPathForRole(saved.role))
       router.refresh()
     })
   }
@@ -273,9 +287,18 @@ function ProfileForm({ user }: { user: SessionUser }) {
           </section>
         )}
 
+        {saveError && (
+          <p
+            role="alert"
+            className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-xs leading-relaxed text-destructive-foreground"
+          >
+            حفظنا بياناتك في جلستك لكن تعذّر تثبيتها في قاعدة البيانات: {saveError}
+          </p>
+        )}
+
         <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/70 p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-relaxed text-muted-foreground">
-            نحفظ بياناتك في جلسة متصفحك ثم نوجّهك مباشرة إلى{" "}
+            نحفظ بياناتك في حسابك على المنصة (قاعدة البيانات) ثم نوجّهك مباشرة إلى{" "}
             <span className="font-medium text-foreground">{ROLE_DASHBOARD_PATH[role]}</span> ·{" "}
             {ROLE_LABELS[role]}
           </p>

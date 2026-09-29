@@ -4,12 +4,12 @@ import {
   ADMIN_DASHBOARD_PATH,
   MASTER_ADMIN_EMAIL,
   MASTER_ADMIN_EMAILS,
-  SESSION_EMAIL_COOKIE,
   isAdminPath,
   isMasterAdminEmail,
   normalizeAdminEmail,
   parseMasterEmails,
 } from "../../lib/auth-constants"
+import * as authConstants from "../../lib/auth-constants"
 
 describe("isAdminPath (حماية مسارات الأدمن)", () => {
   it("يقبل المسارين المحميين ومساراتهما الفرعية", () => {
@@ -46,10 +46,11 @@ describe("البريد الأساسي للسوبر أدمن", () => {
     }
   })
 
-  it("ثوابت المسارات والكوكي صحيحة", () => {
+  it("ثوابت المسارات صحيحة، ولا يبقى أي كوكي بريد مكتوب من المتصفح", () => {
     assert.equal(ADMIN_DASHBOARD_PATH, "/dashboard/admin")
-    assert.equal(SESSION_EMAIL_COOKIE, "kawalees:email")
     assert.equal(MASTER_ADMIN_EMAIL, "zeko.bassiony@gmail.com")
+    // الحماية تعتمد جلسة Supabase الرسمية فقط — أُزيل كوكي `kawalees:email`.
+    assert.equal("SESSION_EMAIL_COOKIE" in authConstants, false)
   })
 })
 

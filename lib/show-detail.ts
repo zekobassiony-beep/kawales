@@ -56,6 +56,19 @@ export function ageRatingFor(input: { category: string; durationMinutes: number 
   return "+12"
 }
 
+/**
+ * أقل سعر حقيقي بين فئات العرض (لِـ «تبدأ من …»).
+ *
+ * ملاحظة مهمة: كانت بعض المواضع تكتب أقل قيمة مع إضافة الصفر إلى القائمة
+ * فيصبح الناتج **صفرًا دائمًا**؛ لذلك نُجمّع هنا القاعدة في دالة واحدة نقية.
+ */
+export function lowestPriceCents(tiers: { priceCents: number }[]): number {
+  const prices = tiers
+    .map((tier) => tier.priceCents)
+    .filter((price) => Number.isFinite(price) && price >= 0)
+  return prices.length > 0 ? Math.min(...prices) : 0
+}
+
 /** رابط الخريطة: رابط المسرح المحفوظ، أو بحث Google Maps تلقائي من الاسم والعنوان. */
 export function mapsUrlFor(venue: {
   googleMapsUrl?: string | null

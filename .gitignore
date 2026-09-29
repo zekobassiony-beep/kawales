@@ -16,3 +16,7 @@ node_modules
 *.tsbuildinfo
 .vercel
 .env*
+
+# أداة التأشير (محلية فقط)
+.dev-inspect.log
+.shots/

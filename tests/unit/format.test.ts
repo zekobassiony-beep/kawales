@@ -4,6 +4,7 @@ import {
   formatDate,
   formatDuration,
   formatPrice,
+  formatPriceLabel,
   formatTime,
   rowLabel,
   tierForRow,
@@ -24,6 +25,19 @@ describe("formatPrice", () => {
 
   it("never renders fractional digits", () => {
     assert.doesNotMatch(norm(formatPrice(999)), /\.\d/)
+  })
+})
+
+describe("formatPriceLabel", () => {
+  it("يعرض «مجانًا» بدل «0 ج.م» عند الصفر أو أقل", () => {
+    assert.equal(formatPriceLabel(0), "مجانًا")
+    assert.equal(formatPriceLabel(-100), "مجانًا")
+    assert.equal(formatPriceLabel(Number.NaN), "مجانًا")
+  })
+
+  it("يساوي formatPrice لأي مبلغ موجب", () => {
+    assert.equal(norm(formatPriceLabel(25000)), norm(formatPrice(25000)))
+    assert.equal(norm(formatPriceLabel(7400)), "74 ج.م")
   })
 })
 

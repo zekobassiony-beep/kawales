@@ -1,7 +1,6 @@
 import { db, getConnectionString } from "@/lib/db"
 import { bookings, events } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
-import { calculateTotals } from "@/lib/pricing"
 import { getEvents, getTroupes } from "@/lib/queries"
 
 /** ملخص محفظة الفرقة محسوب من حجوزات Neon الحقيقية. */
@@ -36,7 +35,13 @@ export async function getTroupeWallet(troupeId: number): Promise<TroupeWallet> {
       const seats = Array.isArray(row.seats) ? row.seats : []
       gross += row.totalCents
       tickets += seats.length
-      fee += calculateTotals(seats.map((seat) => seat.priceCents)).serviceFeeCents
+      // عمولة المنصة = ما دُفع فعلًا كرسوم خدمة: الإجمالي − مجموع أسعار المقاعد المخزَّنة
+      // (وأسعار المقاعد تُخزَّن بعد خصم الكوبون، فتصير العمولة صفرًا تلقائيًا عند إعفاء الرسوم).
+      const seatsSubtotal = seats.reduce(
+        (sum, seat) => sum + (Number.isFinite(seat.priceCents) ? seat.priceCents : 0),
+        0,
+      )
+      fee += Math.max(0, row.totalCents - seatsSubtotal)
     }
     return {
       grossCents: gross,

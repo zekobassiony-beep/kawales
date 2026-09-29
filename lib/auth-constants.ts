@@ -60,8 +60,12 @@ export const MASTER_ADMIN_EMAIL = MASTER_ADMIN_EMAILS[0] ?? DEFAULT_MASTER_ADMIN
 /** جدول الأدمنز على Supabase. */
 export const ADMIN_USERS_TABLE = "admin_users"
 
-/** كوكي انعكاسي لبريد الجلسة (يقرأه الوسيط لأن الجلسة محلية). */
-export const SESSION_EMAIL_COOKIE = "kawalees:email"
+/**
+ * ملاحظة أمنية: كان هنا كوكي `kawalees:email` يُكتب من المتصفح ويُقرأ في الوسيط
+ * للتحقق من الأدمن — وقد أُزيل بالكامل لأن أي زائر كان يستطيع كتابته ببريد
+ * السوبر أدمن فيدخل اللوحة بلا كلمة مرور. التحقق الآن من جلسة Supabase الرسمية
+ * (`supabase.auth.getUser()`) فقط، في `middleware.ts` و`@/lib/auth`.
+ */
 
 /**
  * المسارات المحميّة للوحات التشغيل:

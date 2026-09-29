@@ -69,7 +69,12 @@ export const events = pgTable("events", {
 export type BookedSeat = {
   seatId: string
   tierId: string
+  /** السعر الفعلي المدفوع للمقعد (بعد خصم الكوبون إن وُجد). */
   priceCents: number
+  /** اسم الفئة وقت الحجز — يُخزَّن داخل `seats` (jsonb) لعرضه في التذكرة. */
+  tierName?: string
+  /** السعر الأصلي قبل الكوبون — لعرض «شكل الخصم» (السعر مشطوبًا) لاحقًا. */
+  originalPriceCents?: number
 }
 
 export const bookings = pgTable("bookings", {

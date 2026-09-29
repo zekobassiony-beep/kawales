@@ -1,19 +1,30 @@
 "use server"
 
-import type { Ticket, TicketStatus } from "@/lib/tickets"
+import type { CheckInOutcome, Ticket, TicketStatus } from "@/lib/tickets"
 import { checkAdminAccess, getSessionEmail } from "@/lib/auth"
 import { getSupabaseUser } from "@/lib/supabase/auth-server"
 import {
+  checkInTicketInDb,
   getTicketFromDb,
+  getTicketStatsFromDb,
   listTicketsFromDb,
   updateTicketReceiptInDb,
   updateTicketStatusInDb,
   upsertTicketInDbDetailed,
   type DbWriteError,
+  type TicketStats,
 } from "@/lib/supabase/tickets"
 import { resolveReceiptPublicUrl, isPublicUrl } from "@/lib/supabase/storage"
 import { sendReceiptToTelegram, type ReceiptVerificationInput, type TelegramSendResult } from "@/lib/telegram"
+import {
+  adminNotifyMode,
+  enqueueAdminNotice,
+  ensureAdminDigestFlushed,
+  escapeTelegramHtml,
+  throttleTelegramChat,
+} from "@/lib/telegram-throttle"
 import { runInBackground } from "@/lib/background"
+import { parseTicketCode } from "@/lib/ticket-code"
 
 /**
  * إجراءات الخادم للتذاكر على Supabase — مصدر الحقيقة للوحات التحكم.
@@ -137,9 +148,44 @@ export async function persistTicket(ticket: Ticket): Promise<PersistTicketResult
   }
 }
 
-/** يرسل طلب الإدارة إلى تليجرام ويسجّل النتيجة بوضوح (بلا رمي أخطاء أبدًا). */
-async function notifyAdmin(ticketId: string, input: ReceiptVerificationInput): Promise<void> {
-  const result: TelegramSendResult = await sendReceiptToTelegram(input).catch((error) => ({
+/** يبني سطرًا مختصرًا لحجز واحد يُدرج في رسالة الملخّص الدوري. */
+function buildAdminNoticeLine(input: ReceiptVerificationInput): string {
+  const seats = input.seatsCount > 0 ? `${input.seatsCount} مقعد` : "بلا مقاعد"
+  const amount = `${Math.round(input.totalCents) / 100} ج.م`
+  const receiptUrl = input.receiptUrl?.trim()
+  const receipt = receiptUrl ? ` · <a href="${escapeTelegramHtml(receiptUrl)}">الإيصال</a>` : ""
+  return (
+    `<b>${escapeTelegramHtml(input.ticketId)}</b> · ${escapeTelegramHtml(input.showTitle || "عرض")}` +
+    ` · ${seats} · ${amount}${receipt}`
+  )
+}
+
+/**
+ * إشعار الإدارة بحجز جديد ويسجّل النتيجة بوضوح (بلا رمي أخطاء أبدًا).
+ *
+ * **الافتراضي: إشعار كامل فوري لكل حجز** — بطاقة الإيصال وأزرار «قبول/رفض»، وهو
+ * أسلوب المنصة في تليجرام ولا يتغيّر إلا بقرار صريح. الملخّص الدوري متاح فقط عند
+ * الطلب عبر `TELEGRAM_ADMIN_MODE=digest`، وإعادة الإرسال اليدوي فورية دائمًا.
+ */
+async function notifyAdmin(
+  ticketId: string,
+  input: ReceiptVerificationInput,
+  options: { instant?: boolean } = {},
+): Promise<void> {
+  if (adminNotifyMode() === "digest" && !options.instant) {
+    enqueueAdminNotice(buildAdminNoticeLine(input))
+    // نضمن إرسال الملخّص داخل دورة الطلب نفسها (المؤقّت وحده لا يعيش بعد الاستجابة).
+    await runInBackground(async () => {
+      await ensureAdminDigestFlushed()
+    }, `ملخّص إدارة تليجرام (${ticketId})`)
+    return
+  }
+
+  // حتى في الإرسال الفوري: تباعد لكل محادثة يمنع تجاوز حدّ تليجرام.
+  const chatKey = process.env.TELEGRAM_ADMIN_CHAT_ID ?? "admin"
+  const result: TelegramSendResult = await throttleTelegramChat(chatKey, () =>
+    sendReceiptToTelegram(input),
+  ).catch((error) => ({
     ok: false,
     error: error instanceof Error ? error.message : String(error),
     code: "network" as const,
@@ -166,7 +212,8 @@ export async function notifyTicketAdmin(ticketId: string): Promise<{ ok: boolean
 
     const receiptUrl = ticket.receiptImage && isPublicUrl(ticket.receiptImage) ? ticket.receiptImage : undefined
     const input = receiptInputFromTicket(ticket, receiptUrl)
-    await runInBackground(() => notifyAdmin(id, input), `إعادة إشعار الإدارة ${id}`)
+    // إعادة الإرسال اليدوية تتجاوز التجميع (المشغّل ينتظرها الآن).
+    await runInBackground(() => notifyAdmin(id, input, { instant: true }), `إعادة إشعار الإدارة ${id}`)
     return { ok: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -257,3 +304,149 @@ export async function decideTicketByProducer(
   const updated = await updateTicketStatusInDb(ticketId.trim().toUpperCase(), status)
   return { ok: updated !== null }
 }
+
+/* ---------- بوابة الدخول: تسجيل الحضور على السيرفر (مصدر الحقيقة) ---------- */
+
+/**
+ * نتيجة تسجيل الحضور كما تعرضها شاشة البوابة.
+ * `outcome` يحدّد التغذية البصرية/السمعية، و`error` تعني فشلًا تقنيًا
+ * (لا حكم على التذكرة) فتسقط الواجهة إلى التخزين المحلي بدل إظهار رفض كاذب.
+ */
+export type GateCheckInResult = {
+  ok: boolean
+  outcome: CheckInOutcome
+  /** رسالة عربية جاهزة للعرض في الماسح. */
+  message: string
+  /** التذكرة من قاعدة البيانات (قد تنقص حقول العرض مثل اسم العرض). */
+  ticket: Ticket | null
+  checkedInAt?: string
+  /** سبب تقني عند تعذّر الوصول للقاعدة. */
+  error?: string
+}
+
+/** ساعة الحضور بتوقيت القاهرة (صيغة مختصرة للعرض في الماسح). */
+function formatCheckInClock(value?: string): string {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return new Intl.DateTimeFormat("ar-EG-u-nu-latn", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Africa/Cairo",
+  }).format(date)
+}
+
+/**
+ * تسجيل حضور تذكرة على السيرفر — **المسار الحقيقي للبوابة**:
+ * يقبل حمولة QR الكاملة (`kawalees:ticket:KW-…:…`) أو المعرّف المجرّد،
+ * ويُنفّذ تحديثًا محروسًا يمنع استخدام التذكرة مرتين (حتى مع مشغّلين متزامنين).
+ * يتطلب جلسة مسجّلة (حساب المسرح/المنظّم) حفاظًا على أمن البوابة.
+ */
+export async function checkInTicketServer(rawCode: string): Promise<GateCheckInResult> {
+  if (!(await requireSignedIn())) {
+    return {
+      ok: false,
+      outcome: "not_found",
+      ticket: null,
+      message: "سجّل الدخول بحساب المسرح أولًا حتى تُسجَّل عمليات المسح على السيرفر.",
+      error: "unauthorized",
+    }
+  }
+
+  const id = parseTicketCode(rawCode)
+  if (!id) {
+    return {
+      ok: false,
+      outcome: "not_found",
+      ticket: null,
+      message: "الكود المقروء غير صالح — اكتب رقم التذكرة (KW-…) يدويًا.",
+      error: "invalid_code",
+    }
+  }
+
+  // تُسجَّل هوية من نفّذ المسح (تتبّع عمليات البوابة عند وجود أكثر من جهاز).
+  const actor = ((await getSessionEmail()) || "غير معروف").trim()
+
+  try {
+    const result = await checkInTicketInDb(id)
+    console.log(`[tickets] مسح البوابة ${id}: ${result.outcome} — المشغّل: ${actor}`)
+    const showLabel = result.ticket?.showTitle?.trim()
+    const showSuffix = showLabel ? ` (${showLabel})` : ""
+    const clock = formatCheckInClock(result.checkedInAt)
+
+    switch (result.outcome) {
+      case "accepted":
+        return {
+          ok: true,
+          outcome: "accepted",
+          ticket: result.ticket,
+          checkedInAt: result.checkedInAt,
+          message: `تم تسجيل الدخول بنجاح${showSuffix} — أهلًا به!`,
+        }
+      case "already_used":
+        return {
+          ok: false,
+          outcome: "already_used",
+          ticket: result.ticket,
+          checkedInAt: result.checkedInAt,
+          message: clock
+            ? `تنبيه: هذه التذكرة مُسجَّلة مسبقًا في تمام الساعة ${clock}.`
+            : "تنبيه: هذه التذكرة مُسجَّلة مسبقًا — لا تُقبل مرتين.",
+        }
+      case "not_verified":
+        return {
+          ok: false,
+          outcome: "not_verified",
+          ticket: result.ticket,
+          message: "تذكرة غير مقبولة بعد — لم يعتمدها المنظّم حتى الآن.",
+        }
+      default:
+        return {
+          ok: false,
+          outcome: "not_found",
+          ticket: null,
+          message: result.error
+            ? `تعذّر تسجيل الحضور: ${result.error}`
+            : `لا توجد تذكرة بالكود ${id} في المنصة.`,
+          ...(result.error ? { error: result.error } : {}),
+        }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[tickets] checkInTicketServer ${id} failed: ${message}`)
+    return {
+      ok: false,
+      outcome: "not_found",
+      ticket: null,
+      error: message,
+      message: `تعذّر الاتصال بقاعدة البيانات (${message}) — أعد المحاولة.`,
+    }
+  }
+}
+
+/* ---------- أرقام اللوحة الإجمالية (بلا تحميل صفوف) ---------- */
+
+/**
+ * الأرقام الإجمالية للتذاكر للوحة السوبر أدمن.
+ *
+ * الغرض: تفصل «الأرقام» عن «القوائم» — القوائم محدودة بأحدث صفوف (حماية النقل)،
+ * وهذه الأرقام تُحسب في قاعدة البيانات فتظل دقيقة عند أي عدد تذاكر.
+ * تتطلب صلاحية أدمن (نفس بوابة لوحة `/dashboard/admin`).
+ */
+export async function getTicketStatsServer(): Promise<TicketStats> {
+  const access = await checkAdminAccess()
+  if (!access.allowed) {
+    return {
+      source: "unavailable",
+      total: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      checkedIn: 0,
+      seats: 0,
+      revenueCents: 0,
+    }
+  }
+  return getTicketStatsFromDb()
+}
+

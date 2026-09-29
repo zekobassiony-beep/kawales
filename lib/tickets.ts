@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react"
 import { sendTelegramNotification } from "@/lib/telegram"
+import type { ServiceFeeMode } from "@/lib/coupon-pricing"
 import {
   isTicketPending,
   normalizeTicketStatus,
@@ -33,8 +34,25 @@ export type { TicketStatus } from "@/lib/ticket-status"
 export type PaymentMethod = string
 /** معرّفات وسائل الدفع الافتراضية. */
 export const DEFAULT_PAYMENT_METHOD_ID = "vodafone_cash"
+/** معرّف وسيلة الدفع للتذكرة المجانية الناتجة عن كوبون 100% (بلا تحويل). */
+export const FREE_COUPON_PAYMENT_METHOD_ID = "coupon_free"
 /** مصدر اعتماد التحويل: أوتوميشن بوت التليجرام، أو رسالة SMS، أو بوابة دفع. */
 export type VerificationChannel = "telegram" | "sms" | "gateway"
+
+/**
+ * لقطة كوبون الخصم وقت الحجز — تُخزَّن مع التذكرة حتى يظل «شكل الخصم»
+ * (السعر الأصلي المشطوب + رسوم الخدمة المجانية) صحيحًا بعد انتهاء الحملة.
+ */
+export type TicketCoupon = {
+  code: string
+  label?: string
+  discountPct: number
+  serviceFeeMode: ServiceFeeMode
+  /** الإجمالي لولا الكوبون (بالقروش). */
+  originalTotalCents: number
+  discountCents: number
+  serviceFeeSavingCents: number
+}
 
 export type Ticket = {
   /** مرجع التذكرة بصيغة KW-XXXXXX. */
@@ -55,6 +73,8 @@ export type Ticket = {
   startsAtIso?: string
   /** الإجمالي بالقروش (piastres) ليطابق `formatPrice`. */
   totalCents: number
+  /** لقطة كوبون الخصم (إن وُجد) — لعرض «شكل الخصم» على التذكرة. */
+  coupon?: TicketCoupon
   paymentMethod: PaymentMethod
   paymentRef: string
   status: TicketStatus
@@ -93,6 +113,7 @@ export const TELEGRAM_TICKET_BOT = "Kawalees_tix_bot"
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   vodafone_cash: "فودافون كاش",
   instapay: "انستا باي (InstaPay)",
+  [FREE_COUPON_PAYMENT_METHOD_ID]: "تذكرة مجانية (كوبون)",
 }
 
 /** اسم وسيلة الدفع المعروض للجمهور — يرجع للمعرّف إن كانت وسيلة مضافة حديثًا. */
@@ -228,6 +249,8 @@ export type CreateTicketInput = {
   paymentRef: string
   receiptImage?: string
   senderPhone?: string
+  /** لقطة كوبون الخصم المطبَّق عند الحجز (اختياري). */
+  coupon?: TicketCoupon
 }
 
 /**
@@ -250,8 +273,15 @@ export function createTicket(input: CreateTicketInput): Ticket {
   mutateTickets((current) => [ticket, ...current])
 
   // إشعار تليجرام بسيط (بديل سريع) — الإيصال الكامل يُرسل عبر `sendReceiptToTelegram`.
+  const couponLine = ticket.coupon
+    ? `\n🎫 كوبون: ${ticket.coupon.code} (−${ticket.coupon.discountPct}%)${
+        ticket.coupon.originalTotalCents > ticket.totalCents
+          ? ` — كان ${formatPiastres(ticket.coupon.originalTotalCents)}`
+          : ""
+      }${ticket.coupon.serviceFeeSavingCents > 0 ? " · رسوم الخدمة مجانًا" : ""}`
+    : ""
   sendTelegramNotification(
-    `🎭 تذكرة جديدة — كواليس\n🎟️ ${ticket.id}\n📌 ${ticket.showTitle}\n👤 ${ticket.customerName}\n💺 ${ticket.seats.join("، ")}\n💳 ${paymentMethodLabel(ticket.paymentMethod)}\n💰 ${formatPiastres(ticket.totalCents)}`,
+    `🎭 تذكرة جديدة — كواليس\n🎟️ ${ticket.id}\n📌 ${ticket.showTitle}\n👤 ${ticket.customerName}\n💺 ${ticket.seats.join("، ")}\n💳 ${paymentMethodLabel(ticket.paymentMethod)}\n💰 ${formatPiastres(ticket.totalCents)}${couponLine}`,
   )
 
   return ticket
@@ -334,6 +364,8 @@ export type ServerTicketStatusUpdate = {
   status: TicketStatus
   /** رابط صورة التذكرة/QR التي يولّدها بوت تليجرام (يتوفر بعد الاعتماد). */
   ticketImageUrl?: string | null
+  /** وقت الحضور عند البوابة (يأتي من السيرفر بعد المسح). */
+  checkedInAt?: string | null
 }
 
 /**
@@ -345,13 +377,16 @@ export function mergeServerTicketUpdate(ticket: Ticket, update: ServerTicketStat
   if (ticket.id !== reference) return null
 
   const imageUrl = update.ticketImageUrl?.trim() ? update.ticketImageUrl.trim() : undefined
+  const checkedInAt = update.checkedInAt?.trim() ? update.checkedInAt.trim() : undefined
   const status = normalizeTicketStatus(update.status)
   const statusChanged = normalizeTicketStatus(ticket.status) !== status
   const imageChanged = Boolean(imageUrl) && ticket.ticketImageUrl !== imageUrl
-  if (!statusChanged && !imageChanged) return null
+  const checkInChanged = Boolean(checkedInAt) && ticket.checkedInAt !== checkedInAt
+  if (!statusChanged && !imageChanged && !checkInChanged) return null
 
   const next: Ticket = { ...ticket, status }
   if (imageUrl) next.ticketImageUrl = imageUrl
+  if (checkedInAt) next.checkedInAt = checkedInAt
   if (statusChanged && status === "approved") {
     next.verifiedAt = next.verifiedAt ?? new Date().toISOString()
     next.verifiedVia = next.verifiedVia ?? "telegram"
