@@ -11,6 +11,7 @@ import {
 } from "@/lib/session"
 import { isAccountRole } from "@/lib/roles"
 import { loadMyProfile, saveMyProfile } from "@/app/actions/profile"
+import { startWorkspaceSync, stopWorkspaceSync } from "@/lib/productions-sync"
 
 /**
  * مزامنة جلسة Supabase Auth الرسمية مع جلسة المنصة المحلية.
@@ -32,7 +33,8 @@ export function SupabaseSessionSync() {
         if (cancelled) return
 
         if (!user) {
-          // لا جلسة حقيقية: نُنظّف الجلسة المحلية القديمة (إن وُجدت).
+          // لا جلسة حقيقية: نُنظّف الجلسة المحلية القديمة (إن وُجدت) ونوقف مزامنة مساحة العمل.
+          stopWorkspaceSync()
           if (isAuthConfigured() && readSession()) persistSession(null)
           return
         }
@@ -51,9 +53,12 @@ export function SupabaseSessionSync() {
         if (cancelled || !remote.ok) return
         if (remote.profile) {
           mergeServerProfile(remote.profile, user.email ?? applied.email)
-          return
+        } else {
+          await saveMyProfile({ role: applied.role, onboarded: applied.onboarded, profile: applied.profile })
         }
-        await saveMyProfile({ role: applied.role, onboarded: applied.onboarded, profile: applied.profile })
+
+        // مساحة العمل (الأعمال/الأودشنات/الدعوات) تُقرأ من Supabase وتُزامَن تلقائيًا.
+        startWorkspaceSync()
       } catch {
         // فشل المزامنة لا يجب أن يعطّل الواجهة.
       }

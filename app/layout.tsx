@@ -5,6 +5,7 @@ import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { FlashBanner } from '@/components/flash-banner'
 import { SupabaseSessionSync } from '@/components/supabase-session-sync'
+import { Toaster } from '@/components/toaster'
 import './globals.css'
 import { DevInspectorMount } from "@/components/dev-inspector-mount"
 
@@ -45,6 +46,7 @@ export default function RootLayout({
         <main className="flex-1">{children}</main>
         <SiteFooter />
         {process.env.NODE_ENV === 'production' && <Analytics />}
+        <Toaster />
         <DevInspectorMount />
       </body>
     </html>

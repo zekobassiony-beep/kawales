@@ -173,19 +173,6 @@ export function RoleGate() {
         <p className="mt-6 text-center text-xs text-foreground/75 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
           أنشئ حسابك ببريدك وكلمة مرور، أو تابع بحساب Google — حسابك يُحفظ على المنصة لتتابع حجوزاتك وتذاكرك.
         </p>
-
-        {/* مدخل الأدمن: يظهر دائمًا (بلا كشف أي بيانات) — والحماية الفعلية على السيرفر. */}
-        <p className="mt-3 flex flex-wrap items-center justify-center gap-1.5 text-center text-xs text-foreground/80 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
-          <ShieldCheck className="h-3.5 w-3.5 text-amber-300" />
-          أدمن كواليس؟ ادخل ببريد الإدارة من أي بطاقة، أو افتح
-          <Link
-            href={ADMIN_DASHBOARD_PATH}
-            className="font-semibold text-amber-300 underline decoration-dotted underline-offset-4"
-          >
-            لوحة الإدارة
-          </Link>
-          مباشرة.
-        </p>
       </div>
 
       <AuthModal role={selected} open={authOpen} onClose={closeAuth} />

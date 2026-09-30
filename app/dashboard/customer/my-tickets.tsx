@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Clock, Download, Loader2, QrCode as QrCodeIcon, Ticket } from "lucide-react"
+import { BadgeCheck, CalendarDays, Clock, Download, Loader2, QrCode as QrCodeIcon, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice } from "@/lib/format"
 import { SectionTitle, StatusBadge } from "@/app/dashboard/ui"
+import { BarSeries, DonutSplit, Gauge3D, StatOrb } from "@/components/dashboard-charts"
 import { TicketQrViewer } from "@/components/ticket-qr-viewer"
 import { SocialShareButton } from "@/components/social-share-button"
 import { TicketModal } from "@/components/ticket-modal"
@@ -31,7 +32,7 @@ import {
  * يدمج التذاكر حيًا من Supabase (مصدر الحقيقة) مع المخزن المحلي كطبقة فورية،
  * والضغط على أي تذكرة يعرض الـ QR Code والتفاصيل الكاملة بمرونة تفاعلية.
  */
-export function MyTickets() {
+export function MyTickets({ hideHeading = false }: { hideHeading?: boolean } = {}) {
   const session = useSession()
   const tickets = useTickets()
   const viewerEmail = session?.email ?? ""
@@ -58,7 +59,8 @@ export function MyTickets() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <SectionTitle>تذاكري وحجوزاتي</SectionTitle>
+        {/* العنوان يُعرض من الحاوية (قسم واحد بعنوان واحد) — لتجنّب تكرار الجملة مرتين. */}
+        {hideHeading ? <span className="sr-only">تذاكري وحجوزاتي</span> : <SectionTitle>تذاكري وحجوزاتي</SectionTitle>}
         <div className="flex gap-2">
           <TabButton active={tab === "upcoming"} onClick={() => setTab("upcoming")}>
             القادمة ({upcoming.length})
@@ -102,7 +104,7 @@ export function MyTickets() {
   )
 }
 
-/** كروت أرقام العميل المحسوبة من جدول التذاكر (Supabase) مع المخزن المحلي. */
+/** «حسابي في أرقام» — لوحة تحليلات ثلاثية الأبعاد لكل تذاكر المستخدم. */
 export function CustomerTicketStats() {
   const session = useSession()
   const tickets = useTickets()
@@ -112,29 +114,104 @@ export function CustomerTicketStats() {
     () => mergeTicketSources(serverTickets, getTicketsForUser(viewerEmail)),
     [tickets, viewerEmail, serverTickets],
   )
-  const { upcoming } = useMemo(() => splitTickets(mine), [mine])
+
   const approved = mine.filter((ticket) => isTicketAccepted(ticket.status)).length
   const pending = mine.filter((ticket) => isTicketPending(ticket.status)).length
-  const last = mine[0]
+  const rejected = mine.filter((ticket) => isTicketRejected(ticket.status)).length
+  const total = mine.length
+  const spendCents = mine.reduce(
+    (sum, ticket) => sum + (Number.isFinite(ticket.totalCents) ? ticket.totalCents : 0),
+    0,
+  )
+  const readyPercent = total > 0 ? (approved / total) * 100 : 0
+  const upcoming = splitTickets(mine).upcoming.length
 
-  const cards = [
-    { label: "تذاكر مقبولة", value: String(approved), hint: "رمز QR جاهز للبوابة" },
-    { label: "بانتظار مراجعة الإيصال", value: String(pending), hint: "تراجعها الإدارة عبر التليجرام" },
-    { label: "عروض قادمة", value: String(upcoming.length), hint: "من تذاكرك المحفوظة" },
-    { label: "آخر تذكرة", value: last?.id ?? "—", hint: last?.showTitle ?? "لا تذاكر بعد" },
-  ]
+  /* أكثر مسرح تكرر في تذاكرك. */
+  const topVenue = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const ticket of mine) {
+      const key = (ticket.venue ?? "").trim()
+      if (key.length > 0) counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ""
+  }, [mine])
+
+  /* مصروفك خلال آخر ٦ أشهر (بالجنيه) من تواريخ التذاكر. */
+  const monthly = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("ar-EG", { month: "short" })
+    const buckets: { key: string; label: string; value: number }[] = []
+    const now = new Date()
+    for (let index = 5; index >= 0; index -= 1) {
+      const date = new Date(now.getFullYear(), now.getMonth() - index, 1)
+      buckets.push({ key: `${date.getFullYear()}-${date.getMonth()}`, label: formatter.format(date), value: 0 })
+    }
+    for (const ticket of mine) {
+      const raw = (ticket as { createdAt?: string }).createdAt
+      const created = raw ? new Date(raw) : null
+      if (!created || Number.isNaN(created.getTime())) continue
+      const bucket = buckets.find((item) => item.key === `${created.getFullYear()}-${created.getMonth()}`)
+      if (bucket) bucket.value += Number.isFinite(ticket.totalCents) ? ticket.totalCents : 0
+    }
+    return buckets.map((bucket) => ({ label: bucket.label, value: Math.round(bucket.value / 100) }))
+  }, [mine])
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {cards.map((card) => (
-        <div key={card.label} className="rounded-xl border border-border/60 bg-card p-5">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">{card.label}</p>
-          <p className="mt-1 font-serif text-2xl font-bold" dir={card.label === "آخر تذكرة" ? "ltr" : undefined}>
-            {card.value}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">{card.hint}</p>
-        </div>
-      ))}
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatOrb
+          label="إجمالي المصروف"
+          value={formatPrice(spendCents)}
+          hint={`من ${total} تذكرة`}
+          icon={<Ticket className="h-5 w-5" />}
+          tone="gold"
+        />
+        <StatOrb
+          label="تذاكر جاهزة للدخول"
+          value={String(approved)}
+          hint="رمز QR مُفعَّل"
+          icon={<BadgeCheck className="h-5 w-5" />}
+          tone="emerald"
+        />
+        <StatOrb
+          label="بانتظار مراجعة الإيصال"
+          value={String(pending)}
+          hint="تعتتمدها الإدارة عبر تليجرام"
+          icon={<Clock className="h-5 w-5" />}
+          tone="violet"
+        />
+        <StatOrb
+          label="حفلات قادمة"
+          value={String(upcoming)}
+          hint={topVenue ? `أكثر مسرح: ${topVenue}` : "من تذاكرك المحفوظة"}
+          icon={<CalendarDays className="h-5 w-5" />}
+          tone="cyan"
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <DonutSplit
+          title="حالة التذاكر"
+          subtitle="توزيع كل تذاكرك على الحالات"
+          segments={[
+            { label: "مقبولة", value: approved, caption: String(approved), tone: "emerald" },
+            { label: "بانتظار المراجعة", value: pending, caption: String(pending), tone: "gold" },
+            { label: "مرفوضة", value: rejected, caption: String(rejected), tone: "violet" },
+          ]}
+        />
+        <Gauge3D
+          title="نسبة التذاكر الجاهزة"
+          percent={readyPercent}
+          caption="المقبولة من إجمالي تذاكرك"
+          tone="emerald"
+        />
+        <BarSeries
+          title="مصروفك آخر ٦ أشهر"
+          subtitle="بالجنيه المصري"
+          points={monthly}
+          formatValue={(value) => formatPrice(value * 100)}
+          tone="cyan"
+        />
+      </div>
     </div>
   )
 }

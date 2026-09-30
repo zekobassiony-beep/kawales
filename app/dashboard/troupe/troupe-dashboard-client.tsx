@@ -2,12 +2,13 @@
 
 import Link from "next/link"
 import Image from "next/image"
-import { ArrowRight, CalendarDays, MapPin, Mic, Plus } from "lucide-react"
+import { ArrowRight, CalendarDays, MapPin, Mic, Percent, Plus, Ticket, TrendingUp, Wallet } from "lucide-react"
 import { formatDate, formatPrice } from "@/lib/format"
 import type { TroupeWallet } from "@/lib/dashboards"
 import type { EventWithRelations } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 import { SectionTitle, StatCard, StatusBadge } from "@/app/dashboard/ui"
+import { BarSeries, DonutSplit, Gauge3D, StatOrb } from "@/components/dashboard-charts"
 import { TicketScanner } from "@/app/dashboard/troupe/ticket-scanner"
 import { ShowWizard } from "@/app/dashboard/troupe/show-wizard"
 import { useState } from "react"
@@ -242,13 +243,90 @@ export function TroupeDashboardClient({ troupe, wallet, shows, venueOptions }: T
       )}
 
       <section className="mt-8">
-        <SectionTitle>المحفظة والأرباح</SectionTitle>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="إجمالي المبيعات" value={formatPrice(wallet.grossCents)} hint={`${wallet.bookingsCount} حجز مؤكد`} />
-          <StatCard label="التذاكر المباعة" value={String(wallet.ticketsSold)} hint="من حجوزات Neon" />
-          <StatCard label="عمولة المنصة" value={formatPrice(wallet.platformFeeCents)} hint="رسوم الخدمة المحصّلة" />
-          <StatCard label="الأرباح الصافية" value={formatPrice(wallet.netCents)} hint="بعد خصم عمولة المنصة" />
-        </div>
+        <SectionTitle>المحفظة والأرباح — تحليلات مباشرة</SectionTitle>
+        <p className="mt-2 text-xs text-muted-foreground">
+          أرقام حقيقية من مبيعاتك، معروضة كرسوم بيانية: التوزيع بين عمولة المنصة وصافي أرباحك، ونسبة إشغال مقاعدك.
+        </p>
+
+        {(() => {
+          const totalCapacity = shows.reduce(
+            (sum, show) => sum + Math.max(1, (show.venue.rows || 0) * (show.venue.seatsPerRow || 0)),
+            0,
+          )
+          const occupancy = totalCapacity > 0 ? (wallet.ticketsSold / totalCapacity) * 100 : 0
+          return (
+            <>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <StatOrb
+                  label="إجمالي المبيعات"
+                  value={formatPrice(wallet.grossCents)}
+                  hint={`${wallet.bookingsCount} حجز مؤكد`}
+                  icon={<Wallet className="h-5 w-5" />}
+                  tone="gold"
+                />
+                <StatOrb
+                  label="التذاكر المباعة"
+                  value={String(wallet.ticketsSold)}
+                  hint={`من سعة ${totalCapacity} مقعدًا`}
+                  icon={<Ticket className="h-5 w-5" />}
+                  tone="cyan"
+                />
+                <StatOrb
+                  label="عمولة المنصة"
+                  value={formatPrice(wallet.platformFeeCents)}
+                  hint="رسوم الخدمة المحصّلة"
+                  icon={<Percent className="h-5 w-5" />}
+                  tone="violet"
+                />
+                <StatOrb
+                  label="الأرباح الصافية"
+                  value={formatPrice(wallet.netCents)}
+                  hint="بعد خصم عمولة المنصة"
+                  icon={<TrendingUp className="h-5 w-5" />}
+                  tone="emerald"
+                />
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                <DonutSplit
+                  title="توزيع المبالغ"
+                  subtitle="نسبة عمولة المنصة مقابل أرباحك"
+                  segments={[
+                    {
+                      label: "أرباحك الصافية",
+                      value: wallet.netCents,
+                      caption: formatPrice(wallet.netCents),
+                      tone: "emerald",
+                    },
+                    {
+                      label: "عمولة المنصة",
+                      value: wallet.platformFeeCents,
+                      caption: formatPrice(wallet.platformFeeCents),
+                      tone: "gold",
+                    },
+                  ]}
+                />
+                <Gauge3D
+                  title="نسبة إشغال مقاعدك"
+                  percent={occupancy}
+                  caption={`${wallet.ticketsSold} تذكرة من ${totalCapacity} مقعدًا`}
+                  tone="cyan"
+                />
+                <BarSeries
+                  title="مكونات المبالغ"
+                  subtitle="إجمالي · عمولة · صافي (بالجنيه)"
+                  points={[
+                    { label: "إجمالي", value: Math.round(wallet.grossCents / 100) },
+                    { label: "عمولة", value: Math.round(wallet.platformFeeCents / 100) },
+                    { label: "صافي", value: Math.round(wallet.netCents / 100) },
+                  ]}
+                  formatValue={(value) => formatPrice(value * 100)}
+                  tone="gold"
+                />
+              </div>
+            </>
+          )
+        })()}
       </section>
       <section className="mt-12 grid gap-8 lg:grid-cols-[1fr_360px]">
         <div>

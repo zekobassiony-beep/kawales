@@ -3,6 +3,7 @@ import { ArrowRight, DoorOpen, ScanLine } from "lucide-react"
 import { mockVenueSchedule } from "@/lib/dashboards"
 import { getEvents, getVenues } from "@/lib/queries"
 import { SectionTitle } from "@/app/dashboard/ui"
+import { CustomerZone } from "@/app/dashboard/customer/customer-zone"
 import { VenueStats } from "@/app/dashboard/venue/venue-stats"
 import { VenueMapsLinks, type VenueMapsRow } from "@/app/dashboard/venue/venue-maps-link"
 import { VenueLayoutBuilder } from "@/components/venue-layout-builder"
@@ -66,6 +67,11 @@ export default async function VenueDashboardPage() {
         <p className="mt-2 text-muted-foreground">{venueCity}</p>
       </header>
 
+      {/* منطقة التذاكر أول الصفحة: مدير المسرح يحجز ويتابع تذاكره من نفس اللوحة. */}
+      <div className="mt-10">
+        <CustomerZone />
+      </div>
+
       <section className="mt-8">
         <SectionTitle>إحصائيات المسرح</SectionTitle>
         <div className="mt-4">
@@ -124,6 +130,7 @@ export default async function VenueDashboardPage() {
           <VenueManualCalendar />
         </div>
       </section>
+
     </div>
   )
 }

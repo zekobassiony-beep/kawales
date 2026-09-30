@@ -16,6 +16,7 @@
     "telegram:info": "node tests/telegram-webhook.mjs --info",
     "db:cleanup-seats": "node scripts/cleanup-orphan-seats.mjs",
     "db:profiles": "node scripts/setup-profiles.mjs",
+    "db:productions": "node scripts/setup-productions.mjs",
     "admin:password": "node scripts/set-admin-password.mjs",
     "db:diagnose-tickets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/register-hooks.mjs scripts/diagnose-tickets.mjs",
     "egypt:seed": "node scripts/egypt-seed.mjs"

@@ -4,7 +4,7 @@ import { useRef } from "react"
 import { Check, X } from "lucide-react"
 import { compressImageFile } from "@/components/avatar-picker"
 import { cn } from "@/lib/utils"
-import type { Production, SeatingMode, TicketTier } from "@/lib/productions"
+import type { Production, SeatingMode, TicketTier, VenueKind } from "@/lib/productions"
 
 /** حقول وشارات مشتركة بين خطوات نموذج إضافة العمل المسرحي. */
 
@@ -15,6 +15,10 @@ export const IMAGE_ACCEPT = "image/*"
 
 export type StepTwoDraft = {
   venue: string | null
+  /** نوع المسرح: مسجَّل على المنصة · مكتوب يدويًا (خارج المنصة) · يُحدَّد لاحقًا. */
+  venueKind?: VenueKind
+  /** مدينة المسرح الخارجي (اختياري). */
+  venueCity?: string
   tiers: TicketTier[]
   seatingMode: SeatingMode
   rows: number

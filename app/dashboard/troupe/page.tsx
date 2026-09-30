@@ -1,6 +1,7 @@
 import { getDefaultTroupe, getTroupeShows, getTroupeWallet } from "@/lib/dashboards"
 import { getEvents } from "@/lib/queries"
 import { TroupeDashboardClient } from "@/app/dashboard/troupe/troupe-dashboard-client"
+import { CustomerZone } from "@/app/dashboard/customer/customer-zone"
 
 export const dynamic = "force-dynamic"
 
@@ -23,11 +24,18 @@ export default async function TroupeDashboardPage() {
   ).sort()
 
   return (
-    <TroupeDashboardClient
-      troupe={troupe ? { name: troupe.name, city: troupe.city } : null}
-      wallet={wallet}
-      shows={shows}
-      venueOptions={venueOptions}
-    />
+    <>
+      {/* منطقة التذاكر أول الصفحة: الأرقام التحليلية والتذاكر قبل محتوى الفرقة. */}
+      <div className="mx-auto max-w-6xl px-4 pt-8 sm:px-6">
+        <CustomerZone />
+      </div>
+
+      <TroupeDashboardClient
+        troupe={troupe ? { name: troupe.name, city: troupe.city } : null}
+        wallet={wallet}
+        shows={shows}
+        venueOptions={venueOptions}
+      />
+    </>
   )
 }

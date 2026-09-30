@@ -21,6 +21,7 @@ import {
   type Production,
   type SeatingMode,
   type TicketTier,
+  type VenueKind,
 } from "@/lib/productions"
 import { INPUT_CLASS, useFilePicker, IMAGE_ACCEPT, type StepTwoDraft } from "./wizard-fields"
 
@@ -31,32 +32,67 @@ import { INPUT_CLASS, useFilePicker, IMAGE_ACCEPT, type StepTwoDraft } from "./w
 
 /* ---------- المسرح ---------- */
 
-export function VenueField({ draft, onChange }: { draft: StepTwoDraft; onChange: (patch: Partial<StepTwoDraft>) => void }) {
+export function VenueField({
+  draft,
+  onChange,
+  suggestions = [],
+}: {
+  draft: StepTwoDraft
+  onChange: (patch: Partial<StepTwoDraft>) => void
+  /** مسارح مسجَّلة على المنصة (من قاعدة البيانات) تظهر كاقتراحات سريعة. */
+  suggestions?: string[]
+}) {
+  const [customOpen, setCustomOpen] = useState(false)
+  const venueKind: VenueKind = draft.venueKind ?? (draft.venue ? "platform" : "later")
+  const venue = draft.venue ?? ""
+  const showCustomInput = customOpen || venueKind === "custom"
+
   return (
     <div>
       <label className="block text-xs text-muted-foreground">مكان العرض</label>
-      <div className="mt-1 flex flex-wrap gap-2">
-        {["مسرح الهوسابير", "ساقية الصاوي", "مسرح الطليعة"].map((venue) => (
+      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+        اختر مسرحًا مسجَّلًا على المنصة، أو اكتب اسم أي مسرح آخر بنفسك (مسرح خارج المنصة) — الحقل يقبل أي نص.
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        {suggestions.map((name) => (
           <button
-            key={venue}
+            key={name}
             type="button"
-            onClick={() => onChange({ venue })}
+            onClick={() => onChange({ venue: name, venueKind: "platform" })}
             className={cn(
               "rounded-full border px-3 py-1 text-xs transition-colors",
-              draft.venue === venue
+              venue === name && venueKind === "platform"
                 ? "border-primary/60 bg-primary/10 text-primary-foreground"
                 : "border-border/60 text-muted-foreground hover:bg-secondary",
             )}
           >
-            {venue}
+            {name}
           </button>
         ))}
+
         <button
           type="button"
-          onClick={() => onChange({ venue: null })}
+          onClick={() => {
+            setCustomOpen(true)
+            onChange({ venueKind: "custom" })
+          }}
           className={cn(
             "rounded-full border px-3 py-1 text-xs transition-colors",
-            draft.venue === null
+            venueKind === "custom"
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+              : "border-border/60 text-muted-foreground hover:bg-secondary",
+          )}
+        >
+          ✍️ مسرح آخر (كتابة يدوية)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChange({ venue: null, venueKind: "later", venueCity: "" })}
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs transition-colors",
+            venueKind === "later"
               ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
               : "border-border/60 text-muted-foreground hover:bg-secondary",
           )}
@@ -64,6 +100,40 @@ export function VenueField({ draft, onChange }: { draft: StepTwoDraft; onChange:
           {LATER_VENUE_LABEL}
         </button>
       </div>
+
+      {showCustomInput && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_180px]">
+          <label className="text-xs text-muted-foreground">
+            اسم المسرح (اكتبه كما تحب ظهوره)
+            <input
+              type="text"
+              value={venueKind === "custom" ? venue : ""}
+              onChange={(event) => onChange({ venue: event.target.value, venueKind: "custom" })}
+              placeholder="مثال: مسرح قصر ثقافة بورسعيد"
+              className={cn(INPUT_CLASS, "mt-1")}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            المدينة (اختياري)
+            <input
+              type="text"
+              value={draft.venueCity ?? ""}
+              onChange={(event) => onChange({ venueCity: event.target.value })}
+              placeholder="مثال: بورسعيد"
+              className={cn(INPUT_CLASS, "mt-1")}
+            />
+          </label>
+        </div>
+      )}
+
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        المختار حاليًا:{" "}
+        <span className="font-medium text-foreground">
+          {venueKind === "later" || venue.trim().length === 0
+            ? "سيُحدَّد لاحقًا"
+            : `${venue}${draft.venueCity ? ` — ${draft.venueCity}` : ""}${venueKind === "custom" ? " (خارج المنصة)" : ""}`}
+        </span>
+      </p>
     </div>
   )
 }

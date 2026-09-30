@@ -1,5 +1,6 @@
 import { getEvents, getSoldSeatCounts } from "@/lib/queries"
 import { ProducerConsole } from "@/app/dashboard/producer/producer-console"
+import { CustomerZone } from "@/app/dashboard/customer/customer-zone"
 import type { ProducerEventInput } from "@/lib/producer-metrics"
 
 export const dynamic = "force-dynamic"
@@ -32,6 +33,11 @@ export default async function ProducerDashboardPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950">
+      {/* منطقة التذاكر أول الصفحة: المخرج كذلك عميل — يحجز ويتابع تذاكره. */}
+      <div className="mx-auto max-w-6xl px-4 pt-8 sm:px-6">
+        <CustomerZone />
+      </div>
+
       <ProducerConsole events={producerEvents} />
     </div>
   )

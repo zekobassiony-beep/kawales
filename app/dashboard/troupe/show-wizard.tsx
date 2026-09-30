@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/app/dashboard/ui"
-import { SHOW_STATUS_LABELS, createProduction, updateProduction, useWorkspace, type Production } from "@/lib/productions"
+import { SHOW_STATUS_LABELS, createProduction, updateProduction, useWorkspace } from "@/lib/productions"
 import { INPUT_CLASS, PosterField, StepPill, showStatusTone, type StepTwoDraft } from "./wizard-fields"
 import { GalleryEditor, InviteSystem, SeatingModeField, StepTwoSummary, TiersEditor, VenueField } from "./wizard-step-two"
 
@@ -25,19 +25,31 @@ export function ShowWizard({
 }) {
   const workspace = useWorkspace()
   const [step, setStep] = useState<1 | 2>(1)
-  const [draftProduction, setDraftProduction] = useState<Production | null>(null)
+  /**
+   * ⚠️ إصلاح جذري: كان هنا `useState<Production>` ينسخ العمل مرة واحدة، فتبقى كل
+   * الأزرار (المسرح/الفئات/نمط الحجز/المعرض/الدعوات) تكتب في المخزن ولا تظهر أي
+   * نتيجة لأن الواجهة تقرأ النسخة القديمة. الآن نحتفظ بالمعرّف فقط ونشتق العمل
+   * الحيّ من المخزن، فتظهر كل ضغطة فورًا.
+   */
+  const [draftId, setDraftId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [posterUrl, setPosterUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
 
+  const draftProduction = useMemo(
+    () => (draftId ? (workspace.productions.find((production) => production.id === draftId) ?? null) : null),
+    [workspace.productions, draftId],
+  )
+
   /* وضع التعديل: نفتح الخطوة الثانية مباشرة على عرض موجود. */
   useEffect(() => {
-    if (editingId) {
-      const existing = workspace.productions.find((production) => production.id === editingId) ?? null
-      setDraftProduction(existing)
-      setTitle(existing?.title ?? "")
-      setPosterUrl(existing?.posterUrl ?? "")
-      setStep(existing ? 2 : 1)
+    if (!editingId) return
+    setDraftId(editingId)
+    setStep(2)
+    const existing = workspace.productions.find((production) => production.id === editingId)
+    if (existing) {
+      setTitle(existing.title)
+      setPosterUrl(existing.posterUrl)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId])
@@ -45,6 +57,8 @@ export function ShowWizard({
   const draft = useMemo<StepTwoDraft>(
     () => ({
       venue: draftProduction?.venue ?? null,
+      venueKind: draftProduction?.venueKind ?? "later",
+      venueCity: draftProduction?.venueCity ?? "",
       tiers: draftProduction?.tiers ?? [],
       seatingMode: draftProduction?.seatingMode ?? "numbered",
       rows: draftProduction?.rows ?? 6,
@@ -73,14 +87,20 @@ export function ShowWizard({
     }
     setError(null)
     const created = createProduction({ title, posterUrl })
-    setDraftProduction(created)
+    setDraftId(created.id)
     setStep(2)
   }
 
   const saveAndClose = () => onClose()
 
-  /* وضع التعديل لعرض غير موجود: لا نعرض شيئًا. */
-  if (editingId && !draftProduction) return null
+  /* وضع التعديل قبل جهوزية مساحة العمل: رسالة بدل صفحة فارغة صامتة. */
+  if (editingId && !draftProduction) {
+    return (
+      <div className="rounded-xl border border-border/60 bg-card p-5 text-sm text-muted-foreground sm:p-6">
+        جارٍ تحميل بيانات العمل المسرحي… إن استمرت الرسالة، أعد تحديث الصفحة.
+      </div>
+    )
+  }
 
   return (
     <div className="rounded-xl border border-primary/30 bg-card p-5 sm:p-6">
@@ -157,7 +177,7 @@ export function ShowWizard({
               تم نشر «{draftProduction.title}» بحالة قريبًا. أكمل التفاصيل التالية متى توفرت — كلها قابلة للتعديل لاحقًا.
             </p>
             <StepTwoSummary production={draftProduction} />
-            <VenueField draft={draft} onChange={patchDraft} />
+            <VenueField draft={draft} onChange={patchDraft} suggestions={venueOptions} />
             {venueOptions.length > 0 && (
               <p className="text-xs text-muted-foreground">مسارح متاحة على المنصة: {venueOptions.join("، ")}</p>
             )}

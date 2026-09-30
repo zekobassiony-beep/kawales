@@ -12,6 +12,8 @@ import { useSyncExternalStore } from "react"
 
 export type ShowStatus = "coming_soon" | "on_sale" | "archived"
 export type SeatingMode = "numbered" | "general_admission"
+/** نوع مكان العرض: مسرح مسجَّل على المنصة · مسرح خارجي بالكتابة · يُحدَّد لاحقًا. */
+export type VenueKind = "platform" | "custom" | "later"
 export type CrewStatus = "invited" | "accepted" | "declined" | "left" | "removed"
 export type AuditionStatus = "open" | "closed"
 export type ApplicationStatus = "pending" | "second_round" | "shortlist" | "rejected"
@@ -57,6 +59,14 @@ export type Production = {
   sold: number
   gallery: string[]
   crew: CrewMember[]
+  /** نوع مكان العرض (يسمح بمسرح غير مسجَّل يكتبه صاحب العمل). */
+  venueKind?: VenueKind
+  /** مدينة المسرح الخارجي (اختياري). */
+  venueCity?: string | null
+  /** رابط العرض المنشور للجمهور (يُملأ عند الربط بقاعدة العروض). */
+  eventSlug?: string | null
+  /** بريد صاحب العمل — يميّز «أعمالي» عن الأعمال التي دُعيت إليها. */
+  ownerEmail?: string
   archivedAt?: string
 }
 
@@ -71,6 +81,8 @@ export type Audition = {
   date: string
   status: AuditionStatus
   createdAt: string
+  /** بريد صاحب الأودشن (لتمييز أودشناتي عن المفتوحة من فرق أخرى). */
+  ownerEmail?: string
 }
 
 export type AuditionApplication = {

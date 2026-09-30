@@ -3,12 +3,18 @@
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Loader2, Lock, Mail, ShieldCheck, UserPlus, X } from "lucide-react"
+import { Loader2, Lock, Mail, UserPlus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ROLE_LABELS, ROLE_META, ONBOARDING_PATH, type AccountRole } from "@/lib/roles"
-import { applySupabaseUser, dashboardPathForUser } from "@/lib/session"
+import {
+  applySupabaseUser,
+  dashboardPathForUser,
+  mergeServerProfile,
+  type SessionUser,
+} from "@/lib/session"
 import { ADMIN_DASHBOARD_PATH, isMasterAdminEmail } from "@/lib/auth-constants"
 import { AddPasswordPanel } from "@/app/login/add-password-panel"
+import { loadMyProfile, saveMyProfile } from "@/app/actions/profile"
 import {
   getSupabaseAuthUser,
   isAuthConfigured,
@@ -95,13 +101,31 @@ export function AuthModal({
   const finishAuth = async (normalizedEmail: string) => {
     const user = await getSupabaseAuthUser()
     const applied = applySupabaseUser(user, role)
+
+    // الجلسة المحلية تُمسح عند تسجيل الخروج، فبدون قراءة الملف من قاعدة البيانات
+    // كان المستخدم يُعاد إلى `/onboarding` في كل دخول. نقرأه هنا ونطبّقه **قبل**
+    // التوجيه، وإن كان الحساب جديدًا (بلا صف) نُنشئ صفّه فورًا في الداتا.
+    const remote = await loadMyProfile()
+    let resolved: SessionUser | null = applied
+    if (remote.ok) {
+      if (remote.profile) {
+        resolved = mergeServerProfile(remote.profile, normalizedEmail) ?? applied
+      } else if (applied) {
+        await saveMyProfile({ role: applied.role, onboarded: applied.onboarded, profile: applied.profile })
+      }
+    } else {
+      setNotice(
+        "الحساب يعمل، لكن حفظ الملف الدائم يحتاج تشغيل scripts/profiles-schema.sql مرة واحدة من SQL Editor في Supabase.",
+      )
+    }
+
     startTransition(() => {
       if (isMasterAdminEmail(normalizedEmail)) {
         router.push(ADMIN_DASHBOARD_PATH)
         router.refresh()
         return
       }
-      router.replace(applied ? dashboardPathForUser(applied) : ONBOARDING_PATH)
+      router.replace(resolved ? dashboardPathForUser(resolved) : ONBOARDING_PATH)
       router.refresh()
     })
   }
@@ -365,17 +389,6 @@ export function AuthModal({
             {mode === "signup"
               ? "حساب حقيقي محفوظ على المنصة — تستخدمه لاحقًا في حجز تذاكرك ومتابعة حجوزاتك."
               : "أدخل البريد وكلمة المرور الخاصين بحسابك على كواليس."}
-          </p>
-
-          <p className="flex flex-wrap items-center justify-center gap-1.5 text-center text-[11px] leading-relaxed text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-amber-300" />
-            للأدمن: ادخل ببريد السوبر أدمن وسيُوجَّهك تلقائيًا إلى
-            <Link
-              href={ADMIN_DASHBOARD_PATH}
-              className="font-semibold text-amber-300 underline decoration-dotted underline-offset-4"
-            >
-              لوحة الإدارة
-            </Link>
           </p>
         </form>
       </div>
