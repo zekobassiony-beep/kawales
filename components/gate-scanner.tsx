@@ -29,7 +29,7 @@ type ScanEntry = { code: string; outcome: CheckInOutcome; at: string }
 const OUTCOME_TONES: Record<CheckInOutcome, { panel: string; label: string; icon: typeof CheckCircle2 }> = {
   accepted: {
     panel: "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
-    label: "تم تسجيل الدخول بنجاح",
+    label: "تم تسجيل الحضور بنجاح",
     icon: CheckCircle2,
   },
   already_used: {
@@ -97,7 +97,11 @@ export function GateScanner() {
   const runCheckIn = useCallback(async (rawCode: string) => {
     const reference = parseTicketCode(rawCode) || rawCode.trim().toUpperCase()
     if (reference.length === 0) return
-    setCode("")
+    /*
+     * لا نمسح الحقل قبل التحقق: عند رفض الكود (غير موجود/مستخدم/غير معتمد) يجب أن
+     * يبقى ما كتبه المشغّل ظاهرًا ليصحّحه. نمسحه فقط بعد قبول التذكرة استعدادًا
+     * للمسح التالي — وهذا ما تتوقّعه اختبارات البوابة الآلية أيضًا.
+     */
 
     /** يضيف العملية إلى سجل الشاشة (آخر ٦ عمليات). */
     const record = (outcome: CheckInOutcome) =>
@@ -132,10 +136,11 @@ export function GateScanner() {
         })
         playFeedback(remote.outcome)
         record(remote.outcome)
+        if (remote.outcome === "accepted") setCode("")
         return
       }
 
-      setServerNotice(remote.message)
+      setServerNotice(`تعذّر التحقق على السيرفر: ${remote.message}`)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       setServerNotice(`تعذّر الوصول إلى السيرفر (${reason}) — تم التحقق محليًا على هذا الجهاز فقط.`)
@@ -146,6 +151,7 @@ export function GateScanner() {
     setResult(outcome)
     playFeedback(outcome.outcome)
     record(outcome.outcome)
+    if (outcome.outcome === "accepted") setCode("")
   }, [])
 
   return (

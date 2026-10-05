@@ -52,6 +52,15 @@ export function ShowWizard({
   const [posterUrl, setPosterUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  /**
+   * تعديلات أُدخلت قبل وجود صف المسودة (عمل جديد لم يُحفظ بعد).
+   *
+   * كان `patchDraft` يخرج فورًا عند غياب الصف (`if (!draftProduction) return`) بينما
+   * كل الحقول مربوطة بالمسودة المشتقة من المخزن — فيضيع كل ما يكتبه المستخدم
+   * (الصفوف/المقاعد/المسرح/الفئات/المواعيد) ويعود للقيم الافتراضية (6 × 10).
+   * نحتفظ بالتعديلات هنا ونطبّقها لحظة إنشاء الصف.
+   */
+  const [pendingDraft, setPendingDraft] = useState<Partial<StepTwoDraft>>({})
 
   const draftProduction = useMemo(
     () => (draftId ? (workspace.productions.find((production) => production.id === draftId) ?? null) : null),
@@ -70,8 +79,8 @@ export function ShowWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId])
 
-  const draft = useMemo<StepTwoDraft>(
-    () => ({
+  const draft = useMemo<StepTwoDraft>(() => {
+    const base: StepTwoDraft = {
       venue: draftProduction?.venue ?? null,
       venueKind: draftProduction?.venueKind ?? "later",
       venueCity: draftProduction?.venueCity ?? "",
@@ -85,14 +94,19 @@ export function ShowWizard({
       gallery: draftProduction?.gallery ?? [],
       startsAt: draftProduction?.startsAt ?? "",
       showtimes: draftProduction?.showtimes ?? [],
-    }),
-    [draftProduction],
-  )
+    }
+    // قبل وجود الصف: القيم المُدخلة في الواجهة تتقدّم على القيم الافتراضية.
+    return draftProduction ? base : { ...base, ...pendingDraft }
+  }, [draftProduction, pendingDraft])
 
   /** يحدّث حقلًا في المسودة محليًا — والمزامنة ترفعه لقاعدة البيانات تلقائيًا. */
   const patchDraft = (patch: Partial<StepTwoDraft>) => {
-    if (!draftProduction) return
-    updateProduction(draftProduction.id, patch)
+    if (draftProduction) {
+      updateProduction(draftProduction.id, patch)
+      return
+    }
+    // لا صف بعد: نحفظ التعديل في الحالة المعلّقة حتى لا يضيع عند الحفظ الأول.
+    setPendingDraft((current) => ({ ...current, ...patch }))
   }
 
   /** يضمن وجود صف للعمل (يُنشئ مسودة عند الحاجة) — أساس الحفظ في خطوة واحدة. */
@@ -104,6 +118,11 @@ export function ShowWizard({
     }
     const created = createProduction({ title, posterUrl })
     setDraftId(created.id)
+    // نطبّق ما أُدخل قبل الحفظ حتى تصل الصفوف والمسرح والفئات مع الصف الجديد.
+    if (Object.keys(pendingDraft).length > 0) {
+      updateProduction(created.id, pendingDraft)
+      setPendingDraft({})
+    }
     return created.id
   }
 

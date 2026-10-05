@@ -381,7 +381,7 @@ export async function checkInTicketServer(rawCode: string): Promise<GateCheckInR
           outcome: "accepted",
           ticket: result.ticket,
           checkedInAt: result.checkedInAt,
-          message: `تم تسجيل الدخول بنجاح${showSuffix} — أهلًا به!`,
+          message: `تم تسجيل الحضور بنجاح${showSuffix} — أهلًا به!`,
         }
       case "already_used":
         return {

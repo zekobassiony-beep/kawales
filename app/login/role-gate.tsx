@@ -150,7 +150,7 @@ export function RoleGate() {
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
                 >
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  لوحة الإدارة
+                  بوابة الإدارة
                 </Link>
               )}
               <Link
