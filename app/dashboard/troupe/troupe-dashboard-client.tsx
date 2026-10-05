@@ -19,11 +19,15 @@ import {
   createAudition,
   setApplicationStatus,
   setAuditionStatus,
+  updateProduction,
   useWorkspace,
   type ApplicationStatus,
   type Audition,
   type AuditionApplication,
 } from "@/lib/productions"
+import { notify } from "@/lib/toast"
+import { publishProductionToCatalogue } from "@/app/actions/catalogue"
+import { useRouter } from "next/navigation"
 
 /**
  * البيانات التي يجلبها الـ Server Component (`page.tsx`) ويُمرّرها جاهزة.
@@ -31,6 +35,8 @@ import {
  */
 export type TroupeDashboardClientProps = {
   troupe: { name: string; city: string | null } | null
+  /** اسم الفرقة كما كتبه صاحب الحساب (من ملف المستخدم) — يظهر في الترويسة. */
+  troupeName: string
   wallet: TroupeWallet
   shows: EventWithRelations[]
   venueOptions: string[]
@@ -155,8 +161,9 @@ function NewAuditionForm() {
   )
 }
 
-export function TroupeDashboardClient({ troupe, wallet, shows, venueOptions }: TroupeDashboardClientProps) {
+export function TroupeDashboardClient({ troupe, troupeName, wallet, shows, venueOptions }: TroupeDashboardClientProps) {
   const workspace = useWorkspace()
+  const router = useRouter()
   const [wizardOpen, setWizardOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -178,7 +185,7 @@ export function TroupeDashboardClient({ troupe, wallet, shows, venueOptions }: T
         <div>
           <p className="text-sm font-medium uppercase tracking-widest text-primary">لوحة التحكم</p>
           <h1 className="mt-2 font-serif text-3xl font-bold sm:text-4xl">
-            {troupe ? `فرقة ${troupe.name}` : "لوحة الفرقة"}
+            {troupeName.trim().length > 0 ? troupeName : (troupe?.name ?? "لوحة الفرقة")}
           </h1>
           {troupe?.city && <p className="mt-2 text-muted-foreground">{troupe.city}</p>}
         </div>
@@ -375,26 +382,83 @@ export function TroupeDashboardClient({ troupe, wallet, shows, venueOptions }: T
               {workspace.productions.length === 0 && (
                 <p className="text-xs text-muted-foreground">لم تنشر أي عمل مسرحي بعد.</p>
               )}
-              {workspace.productions.map((production) => (
-                <div key={production.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 p-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{production.title}</p>
-                    <StatusBadge tone={production.status === "on_sale" ? "green" : production.status === "coming_soon" ? "amber" : "gray"}>
-                      {SHOW_STATUS_LABELS[production.status]}
-                    </StatusBadge>
+              {workspace.productions.map((production) => {
+                const showtimeCount = (production.showtimes ?? []).length + (production.startsAt ? 1 : 0)
+                const crewCount = production.crew.filter((member) => member.status === "accepted").length
+                const firstShowtime = production.startsAt ? new Date(production.startsAt) : null
+                const firstLabel =
+                  firstShowtime && !Number.isNaN(firstShowtime.getTime())
+                    ? firstShowtime.toLocaleDateString("ar-EG", { day: "numeric", month: "short" })
+                    : ""
+
+                return (
+                  <div key={production.id} className="rounded-lg border border-border/60 p-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md border border-border/60 bg-secondary/40">
+                        {production.posterUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={production.posterUrl} alt={production.title} className="h-full w-full object-cover" />
+                        ) : null}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{production.title}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <StatusBadge
+                            tone={
+                              production.status === "on_sale" ? "green" : production.status === "coming_soon" ? "amber" : "gray"
+                            }
+                          >
+                            {SHOW_STATUS_LABELS[production.status]}
+                          </StatusBadge>
+                          <span className="text-[10px] text-muted-foreground">{showtimeCount} موعد</span>
+                          <span className="text-[10px] text-muted-foreground">· {production.gallery.length} صورة</span>
+                          <span className="text-[10px] text-muted-foreground">· {crewCount} طاقم</span>
+                          {production.venue && (
+                            <span className="truncate text-[10px] text-muted-foreground">· {production.venue}</span>
+                          )}
+                          {firstLabel && <span className="text-[10px] text-primary">· يبدأ {firstLabel}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(production.id)
+                          setWizardOpen(true)
+                        }}
+                        className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-secondary"
+                      >
+                        تعديل
+                      </button>
+                      {production.status !== "on_sale" && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            updateProduction(production.id, { status: "on_sale" })
+                            const published = await publishProductionToCatalogue(production.id)
+                            if (published.ok) {
+                              notify(
+                                `نُشر «${production.title}» وأصبح معروضًا للجمهور وقابلًا للحجز ✓`,
+                                "success",
+                                8000,
+                              )
+                            } else {
+                              notify(published.error ?? "تعذّر عرض العمل في الكتالوج العام.", "error", 10000)
+                            }
+                            router.refresh()
+                          }}
+                          className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                        >
+                          نشر الآن
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(production.id)
-                      setWizardOpen(true)
-                    }}
-                    className="shrink-0 rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-secondary"
-                  >
-                    تعديل
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </aside>

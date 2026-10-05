@@ -3,6 +3,7 @@ import { db, getConnectionString } from "@/lib/db"
 import { events, troupes, venues, bookedSeats, bookings } from "@/lib/db/schema"
 import { eq, asc } from "drizzle-orm"
 import type { Troupe } from "@/lib/db/schema"
+import { getSupabaseAdmin } from "@/lib/supabase/server"
 
 export type EventWithRelations = {
   id: number
@@ -228,9 +229,116 @@ async function withDbFallback<T>(query: () => Promise<T>, fallback: T): Promise<
   }
 }
 
+/* ---------- عروض الفرق المنشورة عبر «مساحة العمل» (Supabase) ---------- */
+
+/**
+ * معرّف رقمي ثابت للعرض المنشور من مساحة العمل (سالب حتى لا يتعارض مع
+ * معرّفات قاعدة العروض الأساسية) — يُستخدم في روابط الحجز وحساب المقاعد.
+ */
+function catalogueIdFor(slug: string): number {
+  let hash = 0
+  for (let index = 0; index < slug.length; index += 1) {
+    hash = (hash * 31 + slug.charCodeAt(index)) % 2_000_000_000
+  }
+  return -1 - hash
+}
+
+type PublishedTier = { id?: string; name?: string; priceEgp?: number; color?: string; rows?: number[] }
+
+/** يحوّل صف «عمل مسرحي منشور» في Supabase إلى شكل عرض الكتالوج العام. */
+function publishedRowToEvent(row: Record<string, unknown>): EventWithRelations | null {
+  const slug =
+    (typeof row.event_slug === "string" && row.event_slug.trim().length > 0 ? row.event_slug.trim() : "") ||
+    `prod-${String(row.id ?? "").slice(0, 8)}`
+
+  const showtimes = Array.isArray(row.showtimes)
+    ? (row.showtimes as unknown[]).filter((value): value is string => typeof value === "string")
+    : []
+  const startsAtRaw = (typeof row.starts_at === "string" && row.starts_at) || showtimes[0] || ""
+  const startsAt = startsAtRaw ? new Date(startsAtRaw) : null
+  if (!startsAt || Number.isNaN(startsAt.getTime())) return null
+
+  const tiers = Array.isArray(row.tiers) ? (row.tiers as PublishedTier[]) : []
+  if (tiers.length === 0) return null
+
+  const numbered = String(row.seating_mode ?? "numbered") !== "general_admission"
+  const rows = Math.max(1, Number(row.rows) || 8)
+  const seatsPerRow = Math.max(1, Number(row.seats_per_row) || 12)
+  const poster = typeof row.poster_url === "string" && row.poster_url.length > 0 ? row.poster_url : null
+
+  return {
+    id: catalogueIdFor(slug),
+    slug,
+    title: String(row.title ?? ""),
+    tagline: "",
+    description: "",
+    category: "Drama",
+    language: "Arabic",
+    durationMinutes: 90,
+    posterUrl: poster,
+    heroUrl: poster,
+    startsAt,
+    featured: false,
+    status: String(row.status ?? "on_sale"),
+    trailerUrl: null,
+    hasGroupDiscount: false,
+    hasInteractiveSeats: numbered,
+    priceTiers: tiers.map((tier, index) => ({
+      id: String(tier.id ?? `tier-${index}`),
+      name: String(tier.name ?? `فئة ${index + 1}`),
+      priceCents: Math.max(0, Math.round(Number(tier.priceEgp ?? 0) * 100)),
+      color: String(tier.color ?? "#f59e0b"),
+      rows: Array.isArray(tier.rows)
+        ? tier.rows.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+        : [],
+    })),
+    troupe: { id: 0, name: String(row.owner_email ?? "فرقة كواليس"), slug: "troupe-kawalees", bio: "", city: null },
+    venue: {
+      id: 0,
+      name: String(row.venue_name ?? "يُحدَّد لاحقًا"),
+      slug: "venue-custom",
+      city: String(row.venue_city ?? ""),
+      address: "",
+      googleMapsUrl: null,
+      rows,
+      seatsPerRow,
+    },
+  }
+}
+
+/** يقرأ العروض المنشورة (الحالة «معروض للبيع») من مساحة عمل الفرق على Supabase. */
+async function publishedProductionsAsEvents(): Promise<EventWithRelations[]> {
+  const admin = getSupabaseAdmin()
+  if (!admin) return []
+  try {
+    const { data, error } = await admin
+      .from("productions")
+      .select(
+        "id, owner_email, title, poster_url, status, venue_name, venue_city, seating_mode, rows, seats_per_row, capacity, tiers, starts_at, showtimes, event_slug",
+      )
+      .eq("status", "on_sale")
+    if (error || !data) return []
+    return data
+      .map((row) => publishedRowToEvent(row as Record<string, unknown>))
+      .filter((event): event is EventWithRelations => event !== null)
+  } catch (error) {
+    console.warn("[queries] published productions skipped:", error instanceof Error ? error.message : error)
+    return []
+  }
+}
+
+/** دمج عروض الفرق المنشورة مع كتالوج العروض (بلا تكرار بنفس الرابط) وترتيبها زمنيًا. */
+async function withPublishedProductions(base: EventWithRelations[]): Promise<EventWithRelations[]> {
+  const extra = await publishedProductionsAsEvents()
+  if (extra.length === 0) return base
+  const seen = new Set(base.map((event) => event.slug))
+  const merged = [...base, ...extra.filter((event) => !seen.has(event.slug))]
+  return merged.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+}
+
 /** مُغلَّف بـ `cache()` حتى لا يتكرر الاستعلام بين الهيدر والصفحة في نفس الطلب. */
 export const getEvents = cache(async function getEvents(): Promise<EventWithRelations[]> {
-  return withDbFallback(async () => {
+  const base = await withDbFallback(async () => {
     const rows = await db
       .select({ event: events, troupe: troupes, venue: venues })
       .from(events)
@@ -239,6 +347,9 @@ export const getEvents = cache(async function getEvents(): Promise<EventWithRela
       .orderBy(asc(events.startsAt))
     return rows.map(mapRow)
   }, mockEvents)
+
+  // عروض الفرق التي نُشرت من «مساحة العمل» تظهر للجمهور فورًا في «العروض القادمة».
+  return withPublishedProductions(base)
 })
 
 export async function getFeaturedEvents(): Promise<EventWithRelations[]> {
@@ -261,7 +372,7 @@ export async function getFeaturedEvents(): Promise<EventWithRelations[]> {
 export const getEventBySlug = cache(async function getEventBySlug(
   slug: string,
 ): Promise<EventWithRelations | null> {
-  return withDbFallback(async () => {
+  const base = await withDbFallback(async () => {
     const rows = await db
       .select({ event: events, troupe: troupes, venue: venues })
       .from(events)
@@ -272,6 +383,12 @@ export const getEventBySlug = cache(async function getEventBySlug(
     if (rows.length === 0) return null
     return mapRow(rows[0])
   }, mockEvents.find((event) => event.slug === slug) ?? null)
+
+  if (base) return base
+
+  // صفحة العرض تعمل أيضًا للعروض المنشورة من مساحة عمل الفرق (Supabase).
+  const published = await publishedProductionsAsEvents()
+  return published.find((event) => event.slug === slug) ?? null
 })
 
 export async function getEventById(id: number): Promise<EventWithRelations | null> {

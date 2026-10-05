@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
+import { useSearchParams } from "next/navigation"
 import { Check, Drama, LogOut, ShieldCheck, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ROLE_LABELS, ROLE_META, ROLE_ORDER, type AccountRole } from "@/lib/roles"
+import { ROLE_LABELS, ROLE_META, ROLE_ORDER, isAccountRole, type AccountRole } from "@/lib/roles"
 import { dashboardPathForUser, signOut, useSession } from "@/lib/session"
 import { ADMIN_DASHBOARD_PATH } from "@/lib/auth-constants"
 import { useAdminAccess } from "@/components/use-admin-access"
@@ -53,6 +54,20 @@ export function RoleGate() {
   const user = useSession()
   const admin = useAdminAccess()
   const closeAuth = useCallback(() => setAuthOpen(false), [])
+  const searchParams = useSearchParams()
+
+  /*
+   * تشغيل آلي لمسار الدخول: `/login?role=troupe&auth=1` يفتح نافذة الدخول على
+   * الفئة المطلوبة مباشرة، فيستطيع مشغّل الاختبار الآلي (E2E) ملء البريد وكلمة
+   * المرور بلا الحاجة إلى النقر على بطاقة الفئة أولًا — وهذا هو السبب الذي كان
+   * يجعل خطوة «الدخول» تفشل في كل التدفقات. لا يتأثر الزائر العادي: لا شيء يفتح
+   * تلقائيًا إلا عند وجود `auth=1` أو `role=` صريح في الرابط.
+   */
+  useEffect(() => {
+    const roleParam = searchParams.get("role")
+    if (isAccountRole(roleParam)) setSelected(roleParam)
+    if (searchParams.get("auth") === "1" || isAccountRole(roleParam)) setAuthOpen(true)
+  }, [searchParams])
 
   const active = hoveredRole ?? selected
   const activeAccent = ROLE_META[active].accent
@@ -199,6 +214,7 @@ function RoleCard({
   return (
     <button
       type="button"
+      data-testid={`role-card-${role}`}
       aria-pressed={selected}
       aria-label={`${ROLE_LABELS[role]} — ${meta.cta}`}
       onMouseEnter={() => onHover(role)}

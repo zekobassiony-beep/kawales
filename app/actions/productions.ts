@@ -17,7 +17,7 @@ import type { Workspace, Production, Audition, AuditionApplication, Achievement,
 const TABLE_MISSING_MESSAGE =
   "جداول مساحة العمل غير موجودة على Supabase — شغّل الملف scripts/productions-schema.sql من SQL Editor مرة واحدة."
 
-const PRODUCTION_KEYS = "id, owner_email, title, poster_url, status, venue_kind, venue_name, venue_city, seating_mode, rows, seats_per_row, blocked_seats, capacity, tiers, gallery, starts_at, event_slug"
+const PRODUCTION_KEYS = "id, owner_email, title, poster_url, status, venue_kind, venue_name, venue_city, seating_mode, rows, seats_per_row, blocked_seats, capacity, tiers, gallery, starts_at, showtimes, event_slug"
 const AUDITION_KEYS = "id, owner_email, production_id, title, role, requirements, pay, venue, date_text, status"
 const APPLICATION_KEYS = "id, audition_id, actor_email, actor_name, profile_url, status"
 
@@ -82,6 +82,8 @@ function rowToProduction(row: Record<string, unknown>, crew: CrewMember[]): Prod
     gallery: asArray<string>(row.gallery),
     crew,
     eventSlug: row.event_slug ? text(row.event_slug) : null,
+    startsAt: row.starts_at ? text(row.starts_at) : null,
+    showtimes: asArray<string>(row.showtimes),
     ownerEmail: text(row.owner_email),
   }
 }
@@ -258,6 +260,11 @@ function patchToColumns(patch: Record<string, unknown>): Record<string, unknown>
   if (patch.capacity !== undefined) columns.capacity = number(patch.capacity, 0, 0, 100_000)
   if (Array.isArray(patch.gallery)) columns.gallery = patch.gallery.slice(0, 24).map((image) => text(image, 2_000_000))
   if (typeof patch.startsAt === "string" && patch.startsAt.length > 0) columns.starts_at = patch.startsAt
+  if (Array.isArray(patch.showtimes)) {
+    columns.showtimes = patch.showtimes
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .slice(0, 60)
+  }
   if (typeof patch.eventSlug === "string") columns.event_slug = text(patch.eventSlug, 200) || null
   return columns
 }

@@ -95,3 +95,53 @@ fee), proves the double-booking guard, and then removes the booking and its
 seats again. Always run it with `npm run test:integration` so the alias
 resolver and clean shutdown are handled for you.
 
+## E2E auth (توثيق آلي للاختبارات الشاملة)
+
+الدخول في المنصة **مصادقة Supabase حقيقية**، ونافذة الدخول على `/login` لا تصبح
+قابلة للتفاعل قبل النقر على بطاقة فئة — لذلك يفشل أي مشغّل آلي عند خطوة «الدخول»
+وتفشل معه كل التدفقات. يوجد الآن مسار توثيق مخصّص للاختبار يفتح جلسة حقيقية:
+
+```bash
+npm run e2e:auth                                   # السرّ + روابط الدخول الجاهزة
+node scripts/e2e-auth-info.mjs --check=http://127.0.0.1:3000
+```
+
+| الطلب | النتيجة |
+| --- | --- |
+| `GET /api/e2e/auth?token=…&role=troupe&next=/dashboard/producer` | يفتح جلسة (كوكيز Supabase) ثم 303 إلى `next` أو لوحة الفئة |
+| `POST /api/e2e/auth` بجسم `{ "token", "role", "next" }` | نفس النتيجة + JSON فيه `redirect` (بلا تحويل) |
+| `GET /api/e2e/auth?token=…&action=logout` | ينهي الجلسة ويحوّل إلى `/login` |
+
+- **الحساب:** `admin@kawalees.test` — يُنشأ تلقائيًا بمفتاح الخدمة ببريد مؤكَّد عند
+  أول استخدام (كلمة مروره `kawalees-e2e-2026` افتراضيًا؛ بدّلها بـ
+  `KAWALEES_E2E_AUTH_PASSWORD` أو `?password=`).
+- **تجاوز بوابة الأدمن:** البريد التجريبي يمرّ من `/producer` و`/gatekeeper`
+  و`/dashboard/admin` و`/hq-kawalees` في الاختبار فقط، بلا أي تعديل على جدول
+  `admin_users`.
+- **دخول عبر الواجهة:** `/login?role=troupe&auth=1` يفتح نافذة الدخول مباشرة، وحقولها
+  تحمل `data-testid` ثابتة: `role-card-<role>` · `auth-modal` ·
+  `auth-tab-signin|auth-tab-signup` · `auth-email` · `auth-password` ·
+  `auth-confirm` · `auth-submit`.
+
+### التفعيل
+
+في `.env.local` (محلي فقط، غير محفوظ في المستودع):
+
+```bash
+KAWALEES_E2E_AUTH="1"
+KAWALEES_E2E_AUTH_TOKEN="…"                        # مطلوب في كل طلب
+KAWALEES_E2E_AUTH_EMAILS="admin@kawalees.test,e2e@kawalees.test"
+```
+
+- الوضع **معطّل افتراضيًا** ويشترط العلامة + السرّ معًا، ويُخفي المسار تمامًا (404)
+  عند التعطيل.
+- **ممنوع في الإنتاج:** يُقفل تلقائيًا عند `VERCEL_ENV=production` إلا بتجاوز صريح
+  `KAWALEES_E2E_AUTH_ALLOW_PRODUCTION=1`.
+- بعد تغيير العلامة أعد التفعيل (`next build`/`npm run dev`) لأن الوسيط يقرأ قيمة
+  وقت البناء (انظر التعليق في `lib/e2e-auth.ts`).
+
+`npm run test:e2e` (بناء + `tests/smoke.mjs`) يتحقق فعليًا عبر HTTP من: رفض الطلب بلا
+سرّ (401)، فتح جلسة حقيقية، مرور المسار المحمي بالجلسة بدل التحويل إلى `/login`،
+وإنهاء الجلسة.
+
+

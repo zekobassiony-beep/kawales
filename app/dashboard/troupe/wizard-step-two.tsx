@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ImagePlus, Search, Send, Ticket, Trash2, Users, X } from "lucide-react"
+import { ImagePlus, Plus, Search, Send, Ticket, Trash2, Users, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/app/dashboard/ui"
 import {
@@ -138,9 +138,127 @@ export function VenueField({
   )
 }
 
-/* ---------- فئات التذاكر ---------- */
+/* ---------- المواعيد ---------- */
 
-/* ---------- فئات التذاكر المخصّصة (الاسم/السعر/اللون/نطاق الصفوف) ---------- */
+/** تنسيق موعد للعرض (بتوقيت القاهرة) — يظهر للفرقة قبل النشر. */
+function formatShowtime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("ar-EG-u-nu-latn", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Cairo",
+  }).format(date)
+}
+
+/**
+ * حقل مواعيد العرض: موعد أساسي **إلزامي للنشر** + مواعيد إضافية (ليالٍ أخرى).
+ *
+ * كان النموذج بلا أي خانة للتاريخ/الوقت، فلا يمكن معرفة موعد العرض ولا عرض
+ * المواعيد المتاحة للجمهور.
+ */
+export function ScheduleField({
+  draft,
+  onChange,
+}: {
+  draft: StepTwoDraft
+  onChange: (patch: Partial<StepTwoDraft>) => void
+}) {
+  const [extra, setExtra] = useState("")
+  const showtimes = draft.showtimes ?? []
+  const primary = draft.startsAt ?? ""
+  const total = showtimes.length + (primary.trim().length > 0 ? 1 : 0)
+
+  const addExtra = () => {
+    const value = extra.trim()
+    if (value.length === 0 || value === primary || showtimes.includes(value)) return
+    onChange({ showtimes: [...showtimes, value].sort() })
+    setExtra("")
+  }
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-xs text-muted-foreground">مواعيد العرض</label>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        الموعد الأساسي مطلوب لإتمام النشر. أضف مواعيد أخرى (ليالٍ إضافية) إن وُجدت — تظهر كمواعيد متاحة لنفس العرض.
+      </p>
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <label className="text-xs text-muted-foreground">
+          الموعد الأساسي *
+          <input
+            type="datetime-local"
+            value={primary}
+            onChange={(event) => onChange({ startsAt: event.target.value })}
+            className={cn(INPUT_CLASS, "mt-1")}
+          />
+        </label>
+        <div className="flex items-end">
+          {primary.trim().length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange({ startsAt: "" })}
+              className="rounded-full border border-border/60 px-4 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary"
+            >
+              مسح الموعد
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <label className="text-xs text-muted-foreground">
+          إضافة موعد آخر
+          <input
+            type="datetime-local"
+            value={extra}
+            onChange={(event) => setExtra(event.target.value)}
+            className={cn(INPUT_CLASS, "mt-1")}
+          />
+        </label>
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={addExtra}
+            disabled={extra.trim().length === 0}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            أضف الموعد
+          </button>
+        </div>
+      </div>
+
+      {showtimes.length > 0 && (
+        <ul className="space-y-1.5">
+          {showtimes.map((value) => (
+            <li
+              key={value}
+              className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-xs"
+            >
+              <span dir="ltr">{formatShowtime(value)}</span>
+              <button
+                type="button"
+                aria-label="حذف الموعد"
+                onClick={() => onChange({ showtimes: showtimes.filter((item) => item !== value) })}
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 text-muted-foreground hover:bg-destructive/10"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="text-[11px] text-muted-foreground">
+        إجمالي المواعيد: <span className="font-semibold text-foreground">{total}</span>
+        {primary.trim().length > 0 && <> — الأول: {formatShowtime(primary)}</>}
+      </p>
+    </div>
+  )
+}
+
+/* ---------- فئات التذاكر ---------- */
 
 /** يستخرج نطاق الصفوف المعروض (1-based) من فئة. */
 function tierRange(rows: number[]): { from: number; to: number } {

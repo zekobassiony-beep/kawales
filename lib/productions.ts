@@ -65,6 +65,10 @@ export type Production = {
   venueCity?: string | null
   /** رابط العرض المنشور للجمهور (يُملأ عند الربط بقاعدة العروض). */
   eventSlug?: string | null
+  /** أول موعد للعرض (ISO) — إلزامي عند النشر. */
+  startsAt?: string | null
+  /** كل مواعيد العرض (ISO) — مواعيد إضافية إلى جانب الأول. */
+  showtimes?: string[]
   /** بريد صاحب العمل — يميّز «أعمالي» عن الأعمال التي دُعيت إليها. */
   ownerEmail?: string
   archivedAt?: string
@@ -679,6 +683,7 @@ export function stepTwoChecklist(production: Production): { label: string; done:
           ? production.rows > 0 && production.seatsPerRow > 0
           : production.capacity > 0,
     },
+    { label: "مواعيد العرض", done: (production.showtimes ?? []).length > 0 || Boolean(production.startsAt) },
     { label: "معرض الصور الدعائية", done: production.gallery.length > 0 },
     { label: "طاقم العمل", done: production.crew.some((member) => member.status === "accepted") },
   ]

@@ -200,6 +200,7 @@ export function AuthModal({
   return (
     <div
       role="dialog"
+      data-testid="auth-modal"
       aria-modal="true"
       aria-label={`${mode === "signup" ? "إنشاء حساب" : "تسجيل الدخول"} — ${ROLE_LABELS[role]}`}
       className={cn(
@@ -261,6 +262,7 @@ export function AuthModal({
                 setError("")
                 setNotice("")
               }}
+              data-testid={`auth-tab-${tab.id}`}
               aria-pressed={mode === tab.id}
               className={cn(
                 "flex-1 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors",
@@ -284,6 +286,7 @@ export function AuthModal({
               <input
                 ref={emailRef}
                 id="auth-email"
+                data-testid="auth-email"
                 name="email"
                 type="email"
                 dir="ltr"
@@ -304,6 +307,7 @@ export function AuthModal({
               <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 id="auth-password"
+                data-testid="auth-password"
                 name="password"
                 type="password"
                 dir="ltr"
@@ -326,6 +330,7 @@ export function AuthModal({
                 <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   id="auth-confirm"
+                  data-testid="auth-confirm"
                   name="confirm"
                   type="password"
                   dir="ltr"
@@ -354,6 +359,7 @@ export function AuthModal({
           )}
 <button
             type="submit"
+            data-testid="auth-submit"
             disabled={pending !== null}
             style={{ backgroundColor: meta.accent, color: "#171310" }}
             className="inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"

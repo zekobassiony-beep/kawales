@@ -29,7 +29,13 @@ export async function reviewApplication(applicationId: string, decision: "accept
   }
 }
 
-/** التحقق من تذكرة عند البوابة بصيغة المرجع KW-XXXXXX. */
+/**
+ * ⚠️ للعرض التجريبي فقط: يتحقق من **صيغة** المرجع ولا يقرأ قاعدة البيانات.
+ *
+ * المسح الحقيقي عند البوابة = `checkInTicketServer` في `app/actions/tickets.ts`
+ * (يُستخدم في `components/gate-scanner.tsx` و`app/dashboard/troupe/ticket-scanner.tsx`
+ * مع كاميرا حقيقية قراءة QR، ويمنع استخدام التذكرة مرتين).
+ */
 export async function verifyTicket(reference: string) {
   const code = reference.trim().toUpperCase()
   if (!/^KW-[A-Z0-9]{6}$/.test(code)) {

@@ -33,6 +33,8 @@ create table if not exists public.productions (
   tiers         jsonb not null default '[]'::jsonb,     -- فئات الأسعار (اسم/سعر/لون/نطاق صفوف)
   gallery       jsonb not null default '[]'::jsonb,
   starts_at     timestamptz,
+  /** مواعيد العرض (مصفوفة ISO) — أول موعد يُخزَّن في starts_at أيضًا للفرز. */
+  showtimes     jsonb not null default '[]'::jsonb,
   event_slug    text,                                   -- رابط العرض المنشور للجمهور (يُملأ عند الربط بقاعدة العروض)
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()

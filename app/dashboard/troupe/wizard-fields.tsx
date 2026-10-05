@@ -27,6 +27,10 @@ export type StepTwoDraft = {
   capacity: number
   sold: number
   gallery: string[]
+  /** الموعد الأساسي للعرض (قيمة `datetime-local`). */
+  startsAt?: string
+  /** مواعيد إضافية (ليالٍ أخرى) بصيغة `datetime-local`. */
+  showtimes?: string[]
 }
 
 export function showStatusTone(status: Production["status"]): "green" | "amber" | "red" | "gray" {

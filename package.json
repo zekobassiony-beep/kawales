@@ -12,6 +12,7 @@
     "test:db": "node tests/probe-db.mjs",
     "test:integration": "node tests/booking-flow.mjs",
     "test:all": "npm run typecheck && npm test && npm run test:e2e && npm run test:integration",
+    "e2e:auth": "node scripts/e2e-auth-info.mjs",
     "telegram:bridge": "node scripts/telegram-bridge.mjs",
     "telegram:info": "node tests/telegram-webhook.mjs --info",
     "db:cleanup-seats": "node scripts/cleanup-orphan-seats.mjs",

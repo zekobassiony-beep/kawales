@@ -8,6 +8,7 @@ import {
 } from "@/lib/auth-constants"
 import { HQ_PATH, isSuperadmin } from "@/lib/roles"
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config"
+import { isE2ETestEmail } from "@/lib/e2e-auth"
 
 /**
  * حماية مسارات الأدمن (`/admin` و `/dashboard/admin`) مع **جلسة Supabase Auth الرسمية**:
@@ -85,6 +86,12 @@ export async function middleware(req: NextRequest) {
     loginUrl.search = `?next=${encodeURIComponent(pathname)}`
     return redirectKeepingSession(loginUrl, response)
   }
+
+  // وضع اختبار E2E: الحساب التجريبي (بعد فتح جلسة Supabase حقيقية من
+  // /api/e2e/auth) يمرّ من بوابة الأدمن، فلا تُرفض تدفقات المنتج/البوابة/الأدمن
+  // في الاختبارات الآلية. لا أثر لهذا في الإنتاج: الوضع معطّل افتراضيًا ويشترط
+  // علامة بيئة + سرًّا (انظر lib/e2e-auth.ts).
+  if (isE2ETestEmail(email)) return response
 
   // (3) غرفة عمليات كواليس: بريدات السوبر أدمن فقط (لا يكفي كونك أدمن لوحة).
   if (isHq) {

@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server"
 import { getSupabaseUser } from "@/lib/supabase/session-server"
 import { ADMIN_USERS_TABLE, MASTER_ADMIN_EMAIL } from "@/lib/auth-constants"
+import { isE2ETestEmail } from "@/lib/e2e-auth"
 
 /**
  * حماية ودخول السوبر أدمن — إدارة المسؤولين عبر جدول `admin_users` في Supabase.
@@ -99,6 +100,16 @@ export type AdminAccess = {
 export async function checkAdminAccess(): Promise<AdminAccess> {
   const email = await getSessionEmail()
   const master = isMasterAdmin(email)
+
+  /*
+   * وضع اختبار E2E: الحساب التجريبي يُمنح صلاحية لوحة الإدارة بلا أي تعديل على جدول
+   * `admin_users` — فبدون ذلك كان `app/dashboard/admin/page.tsx` يعرض شاشة «403»
+   * وترفض إجراءات التذاكر/التحليلات الحسابَ التجريبي رغم مروره من `middleware.ts`
+   * (طبقة الحماية الثانية). الوضع معطّل افتراضيًا وممنوع في الإنتاج، انظر
+   * `lib/e2e-auth.ts`.
+   */
+  if (isE2ETestEmail(email)) return { email, master: true, allowed: true }
+
   return { email, master, allowed: await isAdminEmail(email) }
 }
 

@@ -1,18 +1,36 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Sparkles, X } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { CheckCircle2, Loader2, Rocket, Save, Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/app/dashboard/ui"
+import { notify } from "@/lib/toast"
+import { publishProductionToCatalogue } from "@/app/actions/catalogue"
+import { isServerProductionId, waitForPublishedId } from "@/lib/productions-sync"
 import { SHOW_STATUS_LABELS, createProduction, updateProduction, useWorkspace } from "@/lib/productions"
-import { INPUT_CLASS, PosterField, StepPill, showStatusTone, type StepTwoDraft } from "./wizard-fields"
-import { GalleryEditor, InviteSystem, SeatingModeField, StepTwoSummary, TiersEditor, VenueField } from "./wizard-step-two"
+import { INPUT_CLASS, PosterField, showStatusTone, type StepTwoDraft } from "./wizard-fields"
+import {
+  GalleryEditor,
+  InviteSystem,
+  ScheduleField,
+  SeatingModeField,
+  StepTwoSummary,
+  TiersEditor,
+  VenueField,
+} from "./wizard-step-two"
 
 /**
- * نموذج إضافة عمل مسرحي من خطوتين:
- *  - الخطوة 1 (إجبارية): اسم العرض + البوستر — ويُنشر فورًا بحالة «قريبًا».
- *  - الخطوة 2 (اختيارية): المسرح، فئات التذاكر، نمط الحجز، معرض الصور، والدعوات.
+ * نموذج إضافة/تعديل العمل المسرحي — **نافذة واحدة بكل الحقول**.
+ *
+ * كان النموذج خطوتين: تُنشئ العمل بحالة «قريبًا»، ثم تنزل إلى «أعمالك في مساحة
+ * العمل» وتضغط «تعديل» وترجع لأعلى لإكمال التفاصيل. الآن كل الحقول (الاسم ·
+ * البوستر · المسرح · الفئات · نمط الحجز · المواعيد · المعرض · الطاقم) في نافذة
+ * واحدة، مع زرّي «حفظ ونشر» (عرض فعلي) و«حفظ كمسودة».
  */
+
+/** هل المعرّف صادر من قاعدة البيانات (UUID) أم معرّف محلي مؤقت؟ */
+const isServerId = isServerProductionId
 
 export function ShowWizard({
   venueOptions,
@@ -24,28 +42,26 @@ export function ShowWizard({
   onClose: () => void
 }) {
   const workspace = useWorkspace()
-  const [step, setStep] = useState<1 | 2>(1)
+  const router = useRouter()
   /**
-   * ⚠️ إصلاح جذري: كان هنا `useState<Production>` ينسخ العمل مرة واحدة، فتبقى كل
-   * الأزرار (المسرح/الفئات/نمط الحجز/المعرض/الدعوات) تكتب في المخزن ولا تظهر أي
-   * نتيجة لأن الواجهة تقرأ النسخة القديمة. الآن نحتفظ بالمعرّف فقط ونشتق العمل
-   * الحيّ من المخزن، فتظهر كل ضغطة فورًا.
+   * نحتفظ بمعرّف العمل فقط ونشتق العمل الحيّ من المخزن — حتى تظهر كل ضغطة
+   * (مسرح/فئات/نمط حجز/مواعيد/معرض/دعوات) فورًا بلا أي حالة قديمة.
    */
-  const [draftId, setDraftId] = useState<string | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(editingId)
   const [title, setTitle] = useState("")
   const [posterUrl, setPosterUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const draftProduction = useMemo(
     () => (draftId ? (workspace.productions.find((production) => production.id === draftId) ?? null) : null),
     [workspace.productions, draftId],
   )
 
-  /* وضع التعديل: نفتح الخطوة الثانية مباشرة على عرض موجود. */
+  /* وضع التعديل: نفتح النافذة على عرض موجود مباشرة. */
   useEffect(() => {
     if (!editingId) return
     setDraftId(editingId)
-    setStep(2)
     const existing = workspace.productions.find((production) => production.id === editingId)
     if (existing) {
       setTitle(existing.title)
@@ -67,143 +83,237 @@ export function ShowWizard({
       capacity: draftProduction?.capacity ?? 0,
       sold: draftProduction?.sold ?? 0,
       gallery: draftProduction?.gallery ?? [],
+      startsAt: draftProduction?.startsAt ?? "",
+      showtimes: draftProduction?.showtimes ?? [],
     }),
     [draftProduction],
   )
 
+  /** يحدّث حقلًا في المسودة محليًا — والمزامنة ترفعه لقاعدة البيانات تلقائيًا. */
   const patchDraft = (patch: Partial<StepTwoDraft>) => {
     if (!draftProduction) return
     updateProduction(draftProduction.id, patch)
   }
 
-  const publish = () => {
+  /** يضمن وجود صف للعمل (يُنشئ مسودة عند الحاجة) — أساس الحفظ في خطوة واحدة. */
+  const ensureDraft = (): string | null => {
+    if (draftProduction) return draftProduction.id
     if (title.trim().length < 2) {
-      setError("اسم العرض مطلوب (حرفان على الأقل).")
-      return
+      setError("اكتب اسم العرض أولًا (حرفان على الأقل).")
+      return null
     }
-    if (!posterUrl) {
-      setError("بوستر العرض مطلوب — ارفع صورة للنشر.")
-      return
-    }
-    setError(null)
     const created = createProduction({ title, posterUrl })
     setDraftId(created.id)
-    setStep(2)
+    return created.id
   }
 
-  const saveAndClose = () => onClose()
+  /** حفظ كمسودة (حالة «قريبًا») ثم إغلاق. */
+  const saveAsDraft = () => {
+    const id = ensureDraft()
+    if (!id) return
+    updateProduction(id, { status: "coming_soon" })
+    notify(`حُفظ «${title}» كمسودة (قريبًا) — يمكنك النشر لاحقًا بضغطة واحدة ✓`, "success")
+    onClose()
+  }
 
-  /* وضع التعديل قبل جهوزية مساحة العمل: رسالة بدل صفحة فارغة صامتة. */
+  /** نشر العرض كعرض **فعلي** (معروض للبيع) بتحقق كامل + إدراجه في كتالوج المنصة. */
+  const publishNow = async () => {
+    const id = ensureDraft()
+    if (!id) return
+
+    const missing: string[] = []
+    if (posterUrl.trim().length === 0) missing.push("البوستر")
+    if ((draft.venue ?? "").trim().length === 0) missing.push("مكان العرض")
+    if (draft.tiers.length === 0) missing.push("فئة سعر واحدة على الأقل")
+    if (draft.seatingMode === "numbered" ? !(draft.rows > 0 && draft.seatsPerRow > 0) : !(draft.capacity > 0)) {
+      missing.push("تفاصيل المقاعد/السعة")
+    }
+    if ((draft.startsAt ?? "").trim().length === 0) missing.push("الموعد الأساسي")
+
+    if (missing.length > 0) {
+      setError(`لإتمام النشر أكمل: ${missing.join(" · ")}`)
+      return
+    }
+
+    setError(null)
+    setSaving(true)
+    const showtimes = Array.from(
+      new Set(
+        [draft.startsAt as string, ...(draft.showtimes ?? [])].filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        ),
+      ),
+    )
+    updateProduction(id, { status: "on_sale", startsAt: draft.startsAt, showtimes })
+
+    // النشر العام: يُدرج العرض في كتالوج المنصة (الرئيسية + /shows + صفحة العرض)
+    // فيصبح قابلًا للتصفح والحجز مثل أي عرض آخر.
+    const serverId = isServerId(id) ? id : await waitForPublishedId(title)
+    const published = serverId
+      ? await publishProductionToCatalogue(serverId)
+      : { ok: false, error: "لم تُحفظ المسودة على السيرفر بعد — أعد المحاولة بعد لحظة." }
+
+    if (published.ok) {
+      notify(`نُشر «${title}» وأصبح معروضًا للجمهور وقابلًا للحجز ✓ — تجده في «العروض القادمة»`, "success", 8000)
+    } else {
+      notify(published.error ?? "حُفظ العرض في حسابك، لكن تعذّر عرضه في الكتالوج العام.", "error", 10000)
+    }
+
+    setSaving(false)
+    router.refresh()
+    onClose()
+  }
+
+  /* وضع التعديل قبل جهوزية مساحة العمل: رسالة بدل نافذة فارغة صامتة. */
   if (editingId && !draftProduction) {
     return (
-      <div className="rounded-xl border border-border/60 bg-card p-5 text-sm text-muted-foreground sm:p-6">
+      <div className="mx-auto mt-6 max-w-md rounded-xl border border-border/60 bg-card p-5 text-sm text-muted-foreground">
         جارٍ تحميل بيانات العمل المسرحي… إن استمرت الرسالة، أعد تحديث الصفحة.
       </div>
     )
   }
 
   return (
-    <div className="rounded-xl border border-primary/30 bg-card p-5 sm:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 font-serif text-xl font-semibold">
-            <Sparkles className="h-5 w-5 text-primary" />
-            {editingId ? "تعديل العمل المسرحي" : "إضافة عمل مسرحي جديد"}
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            الخطوة الأولى تنشر العرض فورًا بحالة «قريبًا / Coming Soon» — وبقية التفاصيل اختيارية وتُكمل لاحقًا.
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="إغلاق النموذج"
-          onClick={saveAndClose}
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-secondary"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <StepPill index={1} label="الاسم والبوستر" active={step === 1} done={step > 1} />
-        <StepPill index={2} label="التفاصيل (اختياري)" active={step === 2} done={false} />
-      </div>
-
-      {draftProduction && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>حالة النشر الحالية:</span>
-          <StatusBadge tone={showStatusTone(draftProduction.status)}>{SHOW_STATUS_LABELS[draftProduction.status]}</StatusBadge>
-        </div>
-      )}
-
-      {step === 1 ? (
-        <div className="mt-5 max-w-xl space-y-4">
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-background/85 p-3 backdrop-blur-sm sm:p-6">
+      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-primary/30 bg-card shadow-2xl">
+        {/* ترويسة ثابتة: العنوان وحالة النشر يبقيان في المقدمة أثناء التمرير */}
+        <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border/60 bg-card/95 p-5 backdrop-blur">
           <div>
-            <label htmlFor="wizard-title" className="block text-xs text-muted-foreground">
-              اسم العرض *
-            </label>
-            <input
-              id="wizard-title"
-              type="text"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="مثال: ليلة في القهوة"
-              className={cn(INPUT_CLASS, "mt-1")}
-            />
+            <h2 className="flex items-center gap-2 font-serif text-xl font-semibold">
+              <Sparkles className="h-5 w-5 text-primary" />
+              {editingId ? "تعديل العمل المسرحي" : "إضافة عمل مسرحي جديد"}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              كل التفاصيل في نافذة واحدة — املأ ما تريد ثم اختر «حفظ ونشر» ليظهر العرض معروضًا للبيع فورًا.
+            </p>
+            {draftProduction && (
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                حالة النشر الحالية:
+                <StatusBadge tone={showStatusTone(draftProduction.status)}>
+                  {SHOW_STATUS_LABELS[draftProduction.status]}
+                </StatusBadge>
+              </p>
+            )}
           </div>
-          <div>
-            <label htmlFor="wizard-poster" className="block text-xs text-muted-foreground">
-              بوستر العرض *
-            </label>
-            <PosterField url={posterUrl} onChange={setPosterUrl} label="بوستر العرض" icon={<Sparkles className="h-4 w-4" />} />
-          </div>
+          <button
+            type="button"
+            aria-label="إغلاق النموذج"
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-secondary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        {/* SENDS_SECTIONS_PLACEHOLDER */}
+
+        {/* كل الحقول في مرة واحدة — بلا خطوات ولا نزول إلى مساحة العمل */}
+        <div className="max-h-[68vh] space-y-7 overflow-y-auto p-5">
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">الأساسيات</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="text-xs text-muted-foreground">
+                اسم العرض *
+                <input
+                  id="wizard-title"
+                  type="text"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="مثال: ليلة في القهوة"
+                  className={cn(INPUT_CLASS, "mt-1")}
+                />
+              </label>
+              <div>
+                <span className="block text-xs text-muted-foreground">بوستر العرض *</span>
+                <PosterField
+                  url={posterUrl}
+                  onChange={setPosterUrl}
+                  label="بوستر العرض"
+                  icon={<Sparkles className="h-4 w-4" />}
+                />
+              </div>
+            </div>
+          </section>
+
+          {draftProduction && (
+            <section className="space-y-3">
+              <h3 className="font-serif text-base font-semibold">اكتمال الملف</h3>
+              <StepTwoSummary production={draftProduction} />
+            </section>
+          )}
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">مكان العرض</h3>
+            <VenueField draft={draft} onChange={patchDraft} suggestions={venueOptions} />
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">الفئات والأسعار</h3>
+            <TiersEditor tiers={draft.tiers} onChange={(tiers) => patchDraft({ tiers })} />
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">طريقة الحجز</h3>
+            <SeatingModeField draft={draft} onChange={patchDraft} />
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">المواعيد</h3>
+            <ScheduleField draft={draft} onChange={patchDraft} />
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">الصور الترويجية</h3>
+            <GalleryEditor gallery={draft.gallery} onChange={(gallery) => patchDraft({ gallery })} />
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base font-semibold">طاقم العمل</h3>
+            {draftProduction && isServerId(draftProduction.id) ? (
+              <InviteSystem production={draftProduction} />
+            ) : (
+              <p className="rounded-lg border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
+                الدعوات تُتاح بعد أول حفظ للعمل: اضغط «حفظ كمسودة» ثم افتح «تعديل»، أو أكمل التفاصيل واضغط «حفظ ونشر».
+              </p>
+            )}
+          </section>
+
           {error && (
-            <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive-foreground">
+            <p
+              role="alert"
+              className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs leading-relaxed text-destructive-foreground"
+            >
               {error}
             </p>
           )}
+        </div>
+
+        {/* شريط الأزرار ثابت أسفل النافذة */}
+        <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border/60 bg-card/95 p-4 backdrop-blur">
           <button
             type="button"
-            onClick={publish}
-            className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+            onClick={() => void publishNow()}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            نشر العرض الآن (قريبًا)
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+            حفظ ونشر (عرض فعلي)
           </button>
-        </div>
-      ) : (
-        draftProduction && (
-          <div className="mt-5 space-y-6">
-            <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200">
-              تم نشر «{draftProduction.title}» بحالة قريبًا. أكمل التفاصيل التالية متى توفرت — كلها قابلة للتعديل لاحقًا.
-            </p>
-            <StepTwoSummary production={draftProduction} />
-            <VenueField draft={draft} onChange={patchDraft} suggestions={venueOptions} />
-            {venueOptions.length > 0 && (
-              <p className="text-xs text-muted-foreground">مسارح متاحة على المنصة: {venueOptions.join("، ")}</p>
-            )}
-            <TiersEditor tiers={draft.tiers} onChange={(tiers) => patchDraft({ tiers })} />
-            <SeatingModeField draft={draft} onChange={patchDraft} />
-            <GalleryEditor gallery={draft.gallery} onChange={(gallery) => patchDraft({ gallery })} />
-            <InviteSystem production={draftProduction} />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={saveAndClose}
-                className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-              >
-                حفظ وإغلاق
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="rounded-full border border-border/60 px-5 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary"
-              >
-                رجوع للخطوة الأولى
-              </button>
-            </div>
-          </div>
-        )
-      )}
+          <button
+            type="button"
+            onClick={saveAsDraft}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-full border border-border/60 px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            حفظ كمسودة (قريبًا)
+          </button>
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            يُحفظ في حسابك تلقائيًا مع كل تعديل
+          </span>
+        </footer>
+      </div>
     </div>
   )
 }

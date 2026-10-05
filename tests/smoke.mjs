@@ -9,7 +9,7 @@ import { existsSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import pg from "pg"
-import { resolveConnectionString } from "./load-env.mjs"
+import { loadEnvLocal, resolveConnectionString } from "./load-env.mjs"
 
 const root = path.resolve(import.meta.dirname, "..")
 const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next")
@@ -274,6 +274,88 @@ try {
       pass(`GET ${path} is gated and redirects to /login`)
     } else {
       fail(`GET ${path} returned ${response.status} (expected a redirect to /login, got location "${location}")`)
+    }
+  }
+
+  // 13. وضع اختبار E2E: التوثيق الآلي يفتح جلسة Supabase حقيقية، وبوابة الأدمن تقبلها
+  const localEnv = loadEnvLocal()
+  const e2eFlag = process.env.KAWALEES_E2E_AUTH ?? localEnv.KAWALEES_E2E_AUTH ?? ""
+  const e2eToken = process.env.KAWALEES_E2E_AUTH_TOKEN ?? localEnv.KAWALEES_E2E_AUTH_TOKEN ?? ""
+  const e2eOn =
+    ["1", "true", "yes", "on"].includes(e2eFlag.trim().toLowerCase()) && e2eToken.trim().length > 0
+  const supabaseReady =
+    Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL ?? localEnv.NEXT_PUBLIC_SUPABASE_URL) &&
+    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY ?? localEnv.SUPABASE_SERVICE_ROLE_KEY)
+
+  if (!e2eOn) {
+    // معطّل ⇒ المسار غير موجود أصلًا (لا نكشفه في الإنتاج).
+    const hidden = await get("/api/e2e/auth")
+    if (hidden.status === 404) pass("GET /api/e2e/auth is hidden (404) while the E2E mode is off")
+    else fail(`GET /api/e2e/auth returned ${hidden.status} (expected 404 while the E2E mode is off)`)
+  } else {
+    const noSecret = await fetch(baseUrl + "/api/e2e/auth", { redirect: "manual" })
+    await noSecret.text().catch(() => "")
+    if (noSecret.status === 401) pass("the E2E auth route rejects a request without the secret (401)")
+    else fail(`the E2E auth route without a secret returned ${noSecret.status} (expected 401)`)
+
+    if (!supabaseReady) {
+      warn("Supabase credentials are missing - skipping the real E2E session check")
+    } else {
+      const login = await fetch(
+        `${baseUrl}/api/e2e/auth?token=${encodeURIComponent(e2eToken)}&role=troupe&next=/dashboard/producer`,
+        { redirect: "manual" },
+      )
+      await login.text().catch(() => "")
+      const jar =
+        typeof login.headers.getSetCookie === "function" ? login.headers.getSetCookie() : []
+      const cookieHeader = jar.map((entry) => entry.split(";")[0]).join("; ")
+
+      if (login.status !== 303 || jar.length === 0) {
+        fail(
+          `the E2E login returned ${login.status} with ${jar.length} cookie(s) (expected 303 + Supabase session cookies)`,
+        )
+      } else {
+        pass(
+          `the E2E login opens a real session (${jar.length} cookies -> ${login.headers.get("location") ?? "-"})`,
+        )
+
+        // الجلسة الحقيقية + تجاوز بوابة الأدمن: المسار المحمي يجب ألا يعود إلى /login.
+        const guarded = await fetch(baseUrl + "/producer", {
+          redirect: "manual",
+          headers: { cookie: cookieHeader },
+        })
+        await guarded.text().catch(() => "")
+        const guardedLocation = guarded.headers.get("location") ?? ""
+        if (guardedLocation.includes("/login")) {
+          fail(`GET /producer rejected the E2E session (redirected to ${guardedLocation})`)
+        } else if (guarded.status >= 300 && guarded.status < 400) {
+          pass(`GET /producer accepts the E2E session and redirects to ${guardedLocation}`)
+        } else {
+          pass(`GET /producer accepts the E2E session (status ${guarded.status})`)
+        }
+
+        // طبقة الحماية الثانية (`checkAdminAccess`): لوحة الأدمن تعرض المحتوى لا شاشة 403.
+        const adminView = await fetch(baseUrl + "/dashboard/admin", {
+          redirect: "manual",
+          headers: { cookie: cookieHeader },
+        })
+        const adminBody = await adminView.text().catch(() => "")
+        if (adminView.status !== 200) {
+          fail(`GET /dashboard/admin with the E2E session returned ${adminView.status}`)
+        } else if (adminBody.includes("غير مصرّح بالدخول")) {
+          fail("GET /dashboard/admin rendered the 403 no-access panel for the E2E session")
+        } else {
+          pass("GET /dashboard/admin accepts the E2E session (the second guard passes too)")
+        }
+
+        const logout = await fetch(
+          `${baseUrl}/api/e2e/auth?token=${encodeURIComponent(e2eToken)}&action=logout`,
+          { redirect: "manual" },
+        )
+        await logout.text().catch(() => "")
+        if (logout.status === 303) pass("the E2E logout clears the session")
+        else fail(`the E2E logout returned ${logout.status} (expected 303)`)
+      }
     }
   }
 } catch (error) {

@@ -1,5 +1,6 @@
 "use client"
 
+import { useSyncExternalStore } from "react"
 import { notify } from "@/lib/toast"
 import {
   WORKSPACE_CHANGE_EVENT,
@@ -45,6 +46,60 @@ let timer: number | null = null
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const json = (value: unknown): string => JSON.stringify(value ?? null)
+
+/* ---------- حالة المزامنة (تُعرض في بانر داخل اللوحات) ---------- */
+
+export type WorkspaceSyncStatus = {
+  /** هل جداول Supabase متاحة؟ false ⇒ الحفظ محلي فقط حتى تشغيل ملف الـSQL. */
+  tableReady: boolean
+  /** آخر رسالة خطأ (فارغة = لا مشاكل). */
+  lastError: string
+  /** وقت آخر مزامنة ناجحة (ISO) أو null. */
+  lastSyncAt: string | null
+}
+
+let status: WorkspaceSyncStatus = { tableReady: true, lastError: "", lastSyncAt: null }
+const statusListeners = new Set<() => void>()
+
+function setStatus(patch: Partial<WorkspaceSyncStatus>): void {
+  status = { ...status, ...patch }
+  for (const listener of statusListeners) listener()
+}
+
+function subscribeStatus(listener: () => void): () => void {
+  statusListeners.add(listener)
+  return () => {
+    statusListeners.delete(listener)
+  }
+}
+
+const getStatusSnapshot = (): WorkspaceSyncStatus => status
+
+/** حالة الحفظ الدائم — تُستخدم في بانر التنبيه داخل اللوحات. */
+export function useWorkspaceSyncStatus(): WorkspaceSyncStatus {
+  return useSyncExternalStore(subscribeStatus, getStatusSnapshot, getStatusSnapshot)
+}
+
+/** هل هذا معرّف صادر من قاعدة البيانات (UUID) أم معرّف محلي مؤقت؟ */
+export function isServerProductionId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)
+}
+
+/**
+ * ينتظر أن تُسند قاعدة البيانات معرّفًا حقيقيًا للعمل المنشور (بعد الإنشاء التلقائي).
+ * يلزم قبل النشر العام: قاعدة العروض تحتاج مُعرّف الصفّ الحقيقي، لا المعرّف المحلي.
+ */
+export async function waitForPublishedId(title: string, timeoutMs = 4500): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const found = readWorkspace().productions.find(
+      (production) => production.title === title && isServerProductionId(production.id),
+    )
+    if (found) return found.id
+    await new Promise((resolve) => window.setTimeout(resolve, 250))
+  }
+  return null
+}
 
 /** يكتب لقطة محلية ويُبلغ الواجهة (بلا إعادة إرسالها للسيرفر). */
 function writeLocal(workspace: Workspace): void {
@@ -101,12 +156,13 @@ function productionPatch(local: Production, remote?: Production): Record<string,
     "rows",
     "seatsPerRow",
     "capacity",
+    "startsAt",
   ]
   for (const key of scalarKeys) {
     if (remote && remote[key] === local[key]) continue
     patch[key as string] = local[key]
   }
-  const collectionKeys: (keyof Production)[] = ["tiers", "gallery", "blockedSeats"]
+  const collectionKeys: (keyof Production)[] = ["tiers", "gallery", "blockedSeats", "showtimes"]
   for (const key of collectionKeys) {
     if (remote && json(remote[key]) === json(local[key])) continue
     patch[key as string] = local[key]
@@ -119,10 +175,12 @@ function productionPatch(local: Production, remote?: Production): Record<string,
 export async function hydrateWorkspaceFromServer(): Promise<boolean> {
   const payload = await loadWorkspaceAction()
   if (!payload.ok) {
+    setStatus({ tableReady: payload.tableReady, lastError: payload.error ?? "" })
     if (!payload.tableReady && payload.error) notify(payload.error, "error", 8000)
     return false
   }
   server = payload.workspace
+  setStatus({ tableReady: true, lastError: "", lastSyncAt: new Date().toISOString() })
   writeLocal(clone(payload.workspace))
   return true
 }
@@ -322,8 +380,11 @@ async function pushChanges(): Promise<void> {
 
     // استبدال المعرّفات المؤقتة بمعرّفات قاعدة البيانات.
     applyIdMap(idMap)
+    setStatus({ tableReady: true, lastError: "", lastSyncAt: new Date().toISOString() })
   } catch (error) {
-    notify(error instanceof Error ? error.message : "تعذّرت المزامنة مع السيرفر.", "error")
+    const message = error instanceof Error ? error.message : "تعذّرت المزامنة مع السيرفر."
+    setStatus({ lastError: message })
+    notify(message, "error")
   } finally {
     pushing = false
   }
